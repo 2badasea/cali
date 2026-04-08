@@ -68,6 +68,12 @@ public class CustomSecurityConfig {
 								// 대시보드 → CALI webhook 콜백 경로 (세션 없는 서버→서버 호출)
 								// 인증은 X-Api-Key 헤더로 컨트롤러 레벨에서 검증함
 								, "/api/callback/**"
+								// ExcelWork 미들웨어 연동 경로 (세션 없는 클라이언트 앱 호출)
+								// 잡 조회/파일 중계: token 으로 식별
+								// 콜백: X-Callback-Key 헤더로 컨트롤러 레벨에서 검증함
+								, "/api/excelwork/job/**"
+								, "/api/excelwork/file/**"
+								, "/api/excelwork/callback/**"
 						).permitAll()
 						.anyRequest().authenticated()                // 그외 요청에 대해선 인증된 사용자만 허용
 				)

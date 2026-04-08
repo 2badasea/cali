@@ -70,6 +70,14 @@ public class ReportJobBatch {
     @Builder.Default
     private BatchStatus status = BatchStatus.READY;
 
+    /**
+     * ExcelWork 미들웨어 인증 토큰 (UUID).
+     * createJob 시 발급되며 미들웨어가 잡 조회·콜백 요청 시 식별자로 사용.
+     * cali-worker 방식 배치는 NULL.
+     */
+    @Column(name = "token", length = 64, unique = true)
+    private String token;
+
     /** 배치 생성일시 */
     @Column(name = "create_datetime", nullable = false)
     private LocalDateTime createDatetime;

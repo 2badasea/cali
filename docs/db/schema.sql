@@ -534,10 +534,12 @@ CREATE TABLE IF NOT EXISTS `report_job_batch` (
   `fail_count`        int         NOT NULL DEFAULT 0               COMMENT '실패 건수',
   `status`            varchar(30) NOT NULL DEFAULT 'READY'
     COMMENT '배치 전체 상태 (READY / PROGRESS / SUCCESS / FAIL / CANCEL_REQUESTED / CANCELED)',
+  `token`             varchar(64) DEFAULT NULL                     COMMENT 'ExcelWork 미들웨어 인증 토큰 (UUID hex). cali-worker 방식 배치는 NULL',
   `create_datetime`   datetime    NOT NULL DEFAULT (now())         COMMENT '배치 생성일시',
   `start_datetime`    datetime    DEFAULT NULL                     COMMENT '작업서버에서 처리를 시작한 시각',
   `end_datetime`      datetime    DEFAULT NULL                     COMMENT '배치 전체 처리 완료 시각',
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_token` (`token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='성적서 작업 배치 — 성적서작성/결재 작업의 묶음 단위 (버튼 클릭 1번 = 1배치)';
 
