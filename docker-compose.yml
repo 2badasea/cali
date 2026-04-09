@@ -31,6 +31,7 @@ services:
     volumes:
       # application-dev.properties: 민감 설정(DB URL, NCP 키 등)은 서버 로컬에만 보관
       # 서버에서 최초 1회 생성 필요: /opt/cali/application-dev.properties
+      - /opt/cali/application.properties:/app/application.properties:ro
       - /opt/cali/application-dev.properties:/app/application-dev.properties:ro
       # 로그 및 임시 파일 디렉토리 (서버에서 최초 1회 mkdir 필요)
       - /opt/cali/logs:/app/logs
@@ -38,7 +39,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=dev
       # 마운트된 외부 설정 파일을 Spring Boot에 전달
-      - SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:/app/application-dev.properties
+      - SPRING_CONFIG_LOCATION=optional:file:/app/application.properties,optional:file:/app/application-dev.properties
       - TZ=Asia/Seoul
     restart: unless-stopped
     networks:
