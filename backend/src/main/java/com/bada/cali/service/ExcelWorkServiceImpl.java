@@ -197,8 +197,12 @@ public class ExcelWorkServiceImpl {
                 batch.getId(), token, reportIds.size());
 
         // ── 6. excelwork:// URI 생성 ─────────────────────────────────────────
+        // callbackKey: URI에 포함하면 미들웨어가 appsettings.json 설정 없이
+        // 해당 환경(로컬/개발/운영)의 키를 자동으로 사용할 수 있다.
         String serverUrl = resolveServerUrl(req.getServerUrl());
-        String excelworkUri = "excelwork://process?token=" + token + "&serverUrl=" + serverUrl;
+        String excelworkUri = "excelwork://process?token=" + token
+                + "&serverUrl=" + URLEncoder.encode(serverUrl, StandardCharsets.UTF_8)
+                + "&callbackKey=" + URLEncoder.encode(excelworkCallbackKey, StandardCharsets.UTF_8);
 
         return new ExcelWorkDTO.CreateJobRes(batch.getId(), token, excelworkUri, reportIds.size());
     }

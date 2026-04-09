@@ -38,7 +38,9 @@
       "Bash(./gradlew compileJava)",
       "Read(//c/Users/gnjqt/.jdks//**)",
       "Read(//c//**)",
-      "Bash(JAVA_HOME=\"/c/Users/gnjqt/.jdks/corretto-17.0.18\" ./gradlew compileJava)"
+      "Bash(JAVA_HOME=\"/c/Users/gnjqt/.jdks/corretto-17.0.18\" ./gradlew compileJava)",
+      "Bash(rm C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_alarm_system.md C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_cali_worker.md C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_dev_work_integration.md C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_number_sequence.md C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_report_job_batch.md C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_report_write_validation.md C:/Users/gnjqt/.claude/projects/C--BadaDev-cali/memory/project_work_approval.md)",
+      "Bash(JAVA_HOME=/c/Users/gnjqt/.jdks/corretto-17.0.18 ./gradlew compileJava)"
     ]
   }
 }
