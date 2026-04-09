@@ -1,0 +1,69 @@
+# ═══════════════════════════════════════════════════════════════
+# docker-compose.yml (개발서버 - 홈서버용)
+#
+# 서비스 구성:
+#   backend  — Spring Boot (포트 8050)
+#   frontend — Nginx + React SPA (포트 8080)
+#
+# 포트 전략 (향후 프로젝트 추가 대비):
+#   cali     : backend 8050, frontend 8080
+#   dashboard: backend 8051, frontend 8081  ← 추후 추가 예정
+#
+# 실행:
+#   docker compose up -d --build
+#
+# 중지:
+#   docker compose down
+# ═══════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Spring Boot 백엔드 ────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cali-backend
+    ports:
+      # 홈서버 → 컨테이너 포트 매핑
+      # 8050은 헬스체크(curl localhost:8050/actuator/health) 직접 접근용으로도 사용
+      - "8050:8050"
+    volumes:
+      # application-dev.properties: 민감 설정(DB URL, NCP 키 등)은 서버 로컬에만 보관
+      # 서버에서 최초 1회 생성 필요: /opt/cali/application-dev.properties
+      - /opt/cali/application-dev.properties:/app/application-dev.properties:ro
+      # 로그 및 임시 파일 디렉토리 (서버에서 최초 1회 mkdir 필요)
+      - /opt/cali/logs:/app/logs
+      - /opt/cali/temp:/app/temp
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      # 마운트된 외부 설정 파일을 Spring Boot에 전달
+      - SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:/app/application-dev.properties
+      - TZ=Asia/Seoul
+    restart: unless-stopped
+    networks:
+      - cali-network
+
+  # ── Nginx + React Admin SPA ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cali-frontend
+    ports:
+      # 80이 아닌 8080 사용: 향후 다른 프로젝트와 포트 충돌 방지
+      # 홈서버 접속: http://{홈서버IP}:8080
+      - "8080:80"
+    depends_on:
+      - backend
+    environment:
+      - TZ=Asia/Seoul
+    restart: unless-stopped
+    networks:
+      - cali-network
+
+networks:
+  # 컨테이너 간 통신용 전용 네트워크
+  # nginx.conf에서 "backend:8050" 으로 backend 서비스에 접근 가능
+  cali-network:
+    name: cali-network
