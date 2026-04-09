@@ -126,6 +126,35 @@ $(function () {
 	}
 
 	// =====================================================================
+	// WriteStatusCellRenderer: 성적서작성(ExcelWork) 상태 배지 표시
+	// write_status: IDLE(미작성), READY(대기), PROGRESS(진행중), SUCCESS(완료), FAIL(실패)
+	// =====================================================================
+	class WriteStatusCellRenderer {
+		constructor(props) {
+			this.el = document.createElement('div');
+			this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
+			this.render(props);
+		}
+
+		render(props) {
+			const v = props.value;
+			if (!v || v === 'IDLE') {
+				this.el.innerHTML = '';
+				return;
+			}
+			const map = {
+				READY:    '<span class="badge bg-warning text-dark">대기</span>',
+				PROGRESS: '<span class="badge bg-primary"><span class="spinner-border spinner-border-sm me-1" role="status" style="width:.6rem;height:.6rem;"></span>진행중</span>',
+				SUCCESS:  '<span class="badge bg-success">완료</span>',
+				FAIL:     '<span class="badge bg-danger">실패</span>',
+			};
+			this.el.innerHTML = map[v] ?? `<span class="badge bg-secondary">${v}</span>`;
+		}
+
+		getElement() { return this.el; }
+	}
+
+	// =====================================================================
 	// WorkApprovalCellRenderer: 업로드 컬럼을 결재 트리거 버튼으로 대체
 	// - originFileId 없음: 빈 셀 (성적서 미작성 상태 — 결재 불가)
 	// - originFileId 있음: 결재 아이콘 버튼 → 클릭 시 WORK_APPROVAL 배치 트리거
@@ -368,6 +397,7 @@ $(function () {
 				serializer: (grid_param) => {
 					grid_param.reportStatus    = $('form.searchForm .reportStatusFilter', $modal).val() ?? '';
 					grid_param.workStatus      = $('form.searchForm .workStatusFilter', $modal).val() ?? '';
+					grid_param.writeStatus     = $('form.searchForm .writeStatusFilter', $modal).val() ?? '';
 					grid_param.orderType       = $('form.searchForm .orderTypeFilter', $modal).val() ?? '';
 					grid_param.middleItemCodeId = Number($('form.searchForm .middleCodeSelect', $modal).val() ?? 0);
 					grid_param.smallItemCodeId  = Number($('form.searchForm .smallCodeSelect', $modal).val() ?? 0);
@@ -483,6 +513,15 @@ $(function () {
 				formatter: function (data) {
 					return reportStatusLabel(data.value);
 				},
+			},
+			{
+				// 성적서작성(ExcelWork) 상태 — WriteStatusCellRenderer 로 배지 표시
+				header: '작성',
+				name: 'writeStatus',
+				width: 65,
+				align: 'center',
+				sortable: false,
+				renderer: { type: WriteStatusCellRenderer },
 			},
 			{
 				header: '작성자',
@@ -667,6 +706,59 @@ $(function () {
 			// 모달 닫힘 후 그리드 재조회 — write_status 변경 반영
 			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 			$modal.grid.getPagination().movePageTo(currentPage);
+		})
+		// 버튼: 비정상 종료 복구
+		// 1) 체크된 항목 없으면 warning
+		// 2) writeStatus 가 READY 또는 PROGRESS 인 항목만 대상
+		// 3) 확인 후 PATCH /api/excelwork/reset → 배치 CANCELED 처리 + 성적서 writeStatus IDLE 복구
+		.on('click', '.btnWriteReset', async function () {
+			const checkedRows = $modal.grid.getCheckedRows();
+			if (!checkedRows || checkedRows.length === 0) {
+				gToast('리스트에서 항목을 선택해 주세요.', 'warning');
+				return;
+			}
+
+			// READY/PROGRESS 상태인 항목의 성적서 id 목록 추출
+			// (배치 id를 직접 갖고 있지 않으므로 report.id 기반으로 서버에서 배치 조회)
+			const targetRows = checkedRows.filter(r => r.writeStatus === 'READY' || r.writeStatus === 'PROGRESS');
+			if (targetRows.length === 0) {
+				gToast('복구 대상 항목이 없습니다. (작성대기/작성중 상태만 복구 가능)', 'warning');
+				return;
+			}
+
+			const reportIds = targetRows.map(r => r.id);
+
+			const confirmResult = await gMessage(
+				'비정상 종료 복구',
+				`${reportIds.length}건의 성적서작성 상태를 미작성(IDLE)으로 복구하시겠습니까?<br>` +
+				`<small class="text-muted">미들웨어 비정상 종료 후 고착된 상태를 초기화합니다.</small>`,
+				'question',
+				'confirm',
+				{ confirmButtonText: '복구' }
+			);
+			if (!confirmResult.isConfirmed) return;
+
+			try {
+				gLoadingMessage('상태 복구 중...');
+				const res = await fetch('/api/excelwork/reset', {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json; charset=utf-8' },
+					body: JSON.stringify({ reportIds }),
+				});
+				swal.close();
+				if (!res.ok) throw res;
+				const resData = await res.json();
+				if (resData?.code > 0) {
+					await gMessage('복구 완료', '성적서작성 상태가 복구되었습니다.', 'success', 'alert');
+					const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
+					$modal.grid.getPagination().movePageTo(currentPage);
+				} else {
+					await gMessage('오류', resData.msg ?? '복구 중 오류가 발생했습니다.', 'error', 'alert');
+				}
+			} catch (err) {
+				swal.close();
+				customAjaxHandler(err);
+			}
 		})
 		// 버튼: 성적서대기변경 (준비중)
 		.on('click', '.btnWaitChange', function () {

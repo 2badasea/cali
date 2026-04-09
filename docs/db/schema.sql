@@ -547,6 +547,7 @@ CREATE TABLE IF NOT EXISTS `report_job_item` (
   `id`             bigint      NOT NULL AUTO_INCREMENT  COMMENT '아이템 고유 id',
   `batch_id`       bigint      NOT NULL                 COMMENT '소속 배치 id (report_job_batch.id)',
   `report_id`      bigint      NOT NULL                 COMMENT '처리 대상 성적서 id (report.id)',
+  `file_uuid`      varchar(36) DEFAULT NULL             COMMENT 'ExcelWork 미들웨어 파일 다운로드 식별 UUID. WRITE 배치 생성 시 item별 부여. cali-worker 방식은 NULL',
   `status`         varchar(30) NOT NULL DEFAULT 'READY'
     COMMENT '개별 처리 상태 (READY / PROGRESS / SUCCESS / FAIL / CANCELED)',
   `step`           varchar(50) DEFAULT NULL
@@ -556,6 +557,7 @@ CREATE TABLE IF NOT EXISTS `report_job_item` (
   `start_datetime` datetime    DEFAULT NULL             COMMENT '이 아이템 처리 시작 시각',
   `end_datetime`   datetime    DEFAULT NULL             COMMENT '이 아이템 처리 완료 시각',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_file_uuid` (`file_uuid`),
   KEY `idx_batch_id`  (`batch_id`),
   KEY `idx_report_id` (`report_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci

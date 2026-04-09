@@ -6,11 +6,15 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface ReportJobItemRepository extends JpaRepository<ReportJobItem, Long> {
 
     /** 배치 id로 소속 item 전체 조회 */
     List<ReportJobItem> findByBatchId(Long batchId);
+
+    /** fileUuid로 item 단건 조회 (미들웨어 파일 다운로드 식별에 사용) */
+    Optional<ReportJobItem> findByFileUuid(String fileUuid);
 
     /**
      * 특정 성적서에 대해 현재 READY 또는 PROGRESS 상태인 배치(활성 배치)가 존재하는지 확인.

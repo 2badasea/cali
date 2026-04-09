@@ -87,7 +87,7 @@ public class ExcelWorkController {
      */
     @Operation(
             summary = "ExcelWork 배치 상태 초기화 (비정상 종료 복구)",
-            description = "READY/PROGRESS 로 고착된 배치를 CANCELED 로 전환하고 성적서 writeStatus 를 IDLE 로 복구. " +
+            description = "성적서 id 목록 기준으로 READY/PROGRESS 활성 배치를 CANCELED 로 전환하고 성적서 writeStatus 를 IDLE 로 복구. " +
                     "SUCCESS 인 item 은 유지됨"
     )
     @ApiResponses({
@@ -104,7 +104,7 @@ public class ExcelWorkController {
             @Valid @RequestBody ExcelWorkDTO.ResetReq req,
             @AuthenticationPrincipal CustomUserDetails user
     ) {
-        excelWorkService.resetBatches(req.getBatchIds(), user.getId());
+        excelWorkService.resetBatches(req.getReportIds(), user.getId());
         return ResponseEntity.ok(new ResMessage<>(1, "배치 상태 초기화 완료", null));
     }
 
@@ -142,17 +142,42 @@ public class ExcelWorkController {
     }
 
     /**
-     * 파일 중계 다운로드 — 미들웨어가 필요한 파일을 서버를 통해 스트리밍 수신.
+     * 파일 다운로드 (fileUuid 기반 — 미들웨어 on-demand 다운로드 주 방식).
      *
-     * 미들웨어는 NCP 자격증명 없이 이 엔드포인트로만 파일을 다운로드한다.
-     * SecurityConfig 에서 permitAll 경로.
-     *
-     * fileType 허용값: sample (향후 origin, signature 등 추가 예정)
+     * 미들웨어는 잡 JSON의 items[].fileUuid 를 사용하여 item 처리 시점에 파일을 다운로드한다.
+     * fileUuid → report_job_item 조회 → 배치 샘플 파일 스트리밍.
+     * 세션 인증 불필요 (SecurityConfig permitAll 경로).
      */
     @Operation(
-            summary = "파일 중계 다운로드 (미들웨어용)",
-            description = "미들웨어가 스토리지 파일을 서버 중계로 다운로드. " +
-                    "fileType: sample(샘플 엑셀). 세션 인증 불필요, token 으로 배치 식별"
+            summary = "파일 다운로드 — fileUuid 기반 (미들웨어 on-demand)",
+            description = "잡 JSON의 fileUuid 로 파일을 다운로드. " +
+                    "미들웨어가 item 처리 시점에 1건씩 호출. 세션 인증 불필요"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "파일 스트리밍 성공"),
+            @ApiResponse(responseCode = "404", description = "유효하지 않은 fileUuid 또는 파일 없음",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @GetMapping("/file/{fileUuid}")
+    public ResponseEntity<Resource> streamFileByUuid(
+            @Parameter(description = "item 파일 식별 UUID (잡 JSON의 items[].fileUuid)")
+            @PathVariable String fileUuid
+    ) {
+        return excelWorkService.streamFileByUuid(fileUuid);
+    }
+
+    /**
+     * 파일 중계 다운로드 (token + fileType 기반 — 하위 호환용).
+     *
+     * fileUuid 기반 다운로드가 주 방식이며, 이 엔드포인트는 하위 호환 목적으로 유지.
+     * fileType 허용값: sample
+     */
+    @Operation(
+            summary = "파일 중계 다운로드 — token 기반 (하위 호환용)",
+            description = "token + fileType 으로 파일을 다운로드. fileType: sample(샘플 엑셀). " +
+                    "신규 미들웨어는 fileUuid 기반 엔드포인트를 사용. 세션 인증 불필요"
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "파일 스트리밍 성공"),

@@ -8,6 +8,7 @@ import com.bada.cali.common.enums.ReportType;
 import com.bada.cali.common.enums.YnType;
 import com.bada.cali.config.NcpStorageProperties;
 import com.bada.cali.dto.ExcelWorkDTO;
+import com.bada.cali.dto.WorkerDataDTO;
 import com.bada.cali.entity.FileInfo;
 import com.bada.cali.entity.Log;
 import com.bada.cali.entity.Report;
@@ -24,7 +25,6 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
-import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -43,8 +43,11 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -52,13 +55,14 @@ import java.util.stream.Collectors;
  * ExcelWork 미들웨어 연동 서비스.
  *
  * 역할 범위:
- *   - createJob: 배치·item 생성 + token 발급 + excelwork:// URI 생성
- *   - getJobByToken: 미들웨어용 잡 상세 조회 (파일 중계 URL 포함)
- *   - streamFile: 스토리지 파일을 서버 중계로 스트리밍
- *   - callbackReady: 미들웨어 READY → batch/item PROGRESS 전환
- *   - callbackItemDone: 완성 파일 스토리지 업로드 + item SUCCESS
- *   - callbackDone: 배치 전체 완료 처리
- *   - resetBatches: 비정상 종료 복구 (READY/PROGRESS → CANCELED + 성적서 IDLE)
+ *   - createJob        : 배치·item 생성 + token/fileUuid 발급 + excelwork:// URI 생성
+ *   - getJobByToken    : 미들웨어용 잡 상세 조회 (셀 설정 + 성적서별 데이터 포함 — 완전한 JSON)
+ *   - streamFile       : token 기반 파일 스트리밍 (하위 호환용)
+ *   - streamFileByUuid : fileUuid 기반 파일 스트리밍 (미들웨어 on-demand 다운로드)
+ *   - callbackReady    : 미들웨어 시작 알림 → batch/item/성적서 PROGRESS 전환
+ *   - callbackItemDone : 완성 파일 스토리지 업로드 + item SUCCESS + 로그
+ *   - callbackDone     : 배치 전체 완료 처리
+ *   - resetBatches     : 비정상 종료 복구 (READY/PROGRESS → CANCELED + 성적서 IDLE)
  */
 @Service
 @Log4j2
@@ -73,6 +77,9 @@ public class ExcelWorkServiceImpl {
     private final S3Client                 ncloudS3Client;
     private final NcpStorageProperties     storageProps;
 
+    // WorkerDataServiceImpl 재활용 — 셀 설정 + 성적서 데이터 조합
+    private final WorkerDataServiceImpl    workerDataService;
+
     // ── ExcelWork 전용 설정 ───────────────────────────────────────────────────
 
     /** ExcelWork 미들웨어 콜백 인증 키. 비어 있으면 개발 모드 (검증 생략). */
@@ -84,7 +91,7 @@ public class ExcelWorkServiceImpl {
     private String callbackBaseUrl;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 1. createJob — 배치 생성 + token 발급
+    // 1. createJob — 배치 생성 + token/fileUuid 발급
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
@@ -93,8 +100,8 @@ public class ExcelWorkServiceImpl {
      * 처리 순서:
      *  1. 성적서 유효성 검증
      *  2. ReportJobBatch 생성 (status=READY, token=UUID)
-     *  3. ReportJobItem 목록 생성
-     *  4. 대상 성적서 writeStatus → READY (미들웨어 대기)
+     *  3. ReportJobItem 목록 생성 — 각 item에 fileUuid(UUID) 부여
+     *  4. 대상 성적서 writeStatus → READY
      *  5. 로그 기록
      *  6. excelwork:// URI + 응답 반환
      *
@@ -126,7 +133,6 @@ public class ExcelWorkServiceImpl {
                         String.format("소분류가 설정되지 않은 성적서입니다. (id: %d)", report.getId()));
             }
             // 이미 READY/PROGRESS 상태인 경우 중복 요청 차단
-            // (활성 배치 존재 여부 확인 — 고착 상태 자동 복구는 resetBatches 에서 처리)
             if (report.getWriteStatus() == AppStatus.READY || report.getWriteStatus() == AppStatus.PROGRESS) {
                 boolean hasActive = itemRepository.existsActiveBatchForReport(report.getId(), "WRITE");
                 if (hasActive) {
@@ -134,8 +140,8 @@ public class ExcelWorkServiceImpl {
                             String.format("이미 작업이 진행 중인 성적서입니다. (id: %d, 번호: %s)",
                                     report.getId(), report.getReportNum()));
                 }
-                // 활성 배치 없음 → 이전 비정상 종료 흔적 — FAIL 리셋 후 재작업 허용
-                log.warn("writeStatus={} 이지만 활성 배치 없음 — FAIL 자동 리셋 (reportId: {})",
+                // 활성 배치 없음 → 이전 비정상 종료 흔적 — 자동 리셋 후 재작업 허용
+                log.warn("writeStatus={} 이지만 활성 배치 없음 — 자동 리셋 (reportId: {})",
                         report.getWriteStatus(), report.getId());
                 report.setWriteStatus(AppStatus.FAIL);
             }
@@ -159,18 +165,20 @@ public class ExcelWorkServiceImpl {
                 .createDatetime(LocalDateTime.now())
                 .build());
 
-        // ── 3. ReportJobItem 생성 ─────────────────────────────────────────────
+        // ── 3. ReportJobItem 생성 — item별 fileUuid 부여 ──────────────────────
+        // fileUuid: 미들웨어가 GET /api/excelwork/file/{fileUuid} 로 파일을 on-demand 다운로드할 때 사용.
+        // UUID v4 문자열(36자, 하이픈 포함) 을 각 item에 독립적으로 부여한다.
         List<ReportJobItem> items = reportIds.stream()
                 .map(reportId -> ReportJobItem.builder()
                         .batchId(batch.getId())
                         .reportId(reportId)
-                        .build())  // status 기본값: READY
+                        .fileUuid(UUID.randomUUID().toString())  // 36자 UUID (하이픈 포함)
+                        .build())
                 .collect(Collectors.toList());
         itemRepository.saveAll(items);
 
-        // ── 4. 성적서 writeStatus → READY (미들웨어 대기 상태) ────────────────
+        // ── 4. 성적서 writeStatus → READY ────────────────────────────────────
         reports.forEach(r -> r.setWriteStatus(AppStatus.READY));
-        // @Transactional 범위 내 dirty checking 으로 자동 반영
 
         // ── 5. 로그 기록 ──────────────────────────────────────────────────────
         logRepository.save(Log.builder()
@@ -189,24 +197,28 @@ public class ExcelWorkServiceImpl {
                 batch.getId(), token, reportIds.size());
 
         // ── 6. excelwork:// URI 생성 ─────────────────────────────────────────
-        String serverUrl = (req.getServerUrl() != null && !req.getServerUrl().isBlank())
-                ? req.getServerUrl()
-                : callbackBaseUrl;
+        String serverUrl = resolveServerUrl(req.getServerUrl());
         String excelworkUri = "excelwork://process?token=" + token + "&serverUrl=" + serverUrl;
 
         return new ExcelWorkDTO.CreateJobRes(batch.getId(), token, excelworkUri, reportIds.size());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 2. getJobByToken — 미들웨어용 잡 상세 조회
+    // 2. getJobByToken — 미들웨어용 잡 상세 조회 (완전한 JSON)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * token 으로 배치 + 성적서 목록 + 파일 중계 URL 을 조회한다.
-     * 미들웨어가 작업 시작 전 호출하며, 이 응답의 fileUrl 로 파일을 다운로드한다.
+     * token 으로 잡 상세를 조회하여 미들웨어가 처리에 필요한 모든 데이터를 반환한다.
+     *
+     * 반환 내용:
+     *   - action      : "report_write" (작업 유형 식별자)
+     *   - sheetSettings : Env.sheetInfoSetting 전체 (fieldCode → {cell, format})
+     *   - items        : 성적서별 fileUuid + fileDownloadUrl + 셀 삽입 데이터 맵
+     *
+     * 미들웨어는 이 응답 1건만으로 N건의 성적서 처리를 수행할 수 있다.
      *
      * @param token     잡 토큰
-     * @param serverUrl 파일 중계 URL 생성에 사용할 서버 베이스 URL
+     * @param serverUrl 파일 다운로드 URL 생성에 사용할 서버 베이스 URL
      */
     @Transactional(readOnly = true)
     public ExcelWorkDTO.JobDetailRes getJobByToken(String token, String serverUrl) {
@@ -214,53 +226,63 @@ public class ExcelWorkServiceImpl {
 
         List<ReportJobItem> items = itemRepository.findByBatchId(batch.getId());
 
-        // 서버 베이스 URL (파일 중계 경로 앞에 붙임)
-        String base = (serverUrl != null && !serverUrl.isBlank()) ? serverUrl : callbackBaseUrl;
+        // 서버 베이스 URL (파일 다운로드 URL 앞에 붙임)
+        String base = resolveServerUrl(serverUrl);
 
+        // ── 셀 설정 조회 (한 번만, 모든 item 공용) ───────────────────────────
+        WorkerDataDTO.SheetSettingRes sheetSettingRes = workerDataService.getSheetSetting();
+        // WorkerDataDTO.SheetFieldSetting → ExcelWorkDTO.SheetFieldSetting 변환
+        Map<String, ExcelWorkDTO.SheetFieldSetting> sheetSettings = new LinkedHashMap<>();
+        sheetSettingRes.getSettings().forEach((fieldCode, setting) ->
+                sheetSettings.put(fieldCode,
+                        new ExcelWorkDTO.SheetFieldSetting(setting.getCell(), setting.getFormat())));
+
+        // ── 성적서별 데이터 조합 ──────────────────────────────────────────────
         List<ExcelWorkDTO.ItemDetail> itemDetails = items.stream().map(item -> {
             Report report = reportRepository.findById(item.getReportId())
                     .orElseThrow(() -> new EntityNotFoundException(
                             "성적서를 찾을 수 없습니다. (id: " + item.getReportId() + ")"));
 
-            // WRITE: 샘플 파일 중계 URL (item마다 동일하지만 통일성을 위해 포함)
-            String sampleFileUrl = (batch.getSampleId() != null)
-                    ? base + "/api/excelwork/file/" + token + "/sample"
-                    : null;
+            // 셀 삽입 데이터 조합 (WorkerDataServiceImpl 재활용)
+            WorkerDataDTO.ReportFillDataRes fillData =
+                    workerDataService.getReportFillData(item.getReportId(), batch.getSampleId());
 
-            // WORK_APPROVAL: 원본 파일 중계 URL (현재 WRITE만 구현, 결재 확장 시 사용)
-            String originFileUrl = null;
+            Map<String, String> data = buildDataMap(fillData);
+
+            // 파일 다운로드 URL: GET /api/excelwork/file/{fileUuid}
+            String fileDownloadUrl = base + "/api/excelwork/file/" + item.getFileUuid();
 
             return new ExcelWorkDTO.ItemDetail(
                     item.getId(),
                     report.getId(),
                     report.getReportNum(),
-                    sampleFileUrl,
-                    originFileUrl
+                    item.getFileUuid(),
+                    fileDownloadUrl,
+                    data
             );
         }).toList();
 
-        return new ExcelWorkDTO.JobDetailRes(
-                token,
-                batch.getJobType().name(),
-                batch.getSampleId(),
-                itemDetails
-        );
+        // 작업 유형 → 미들웨어 action 문자열 변환
+        String action = switch (batch.getJobType()) {
+            case WRITE           -> "report_write";
+            case WORK_APPROVAL   -> "work_approval";
+            case MANAGER_APPROVAL -> "manager_approval";
+        };
+
+        return new ExcelWorkDTO.JobDetailRes(token, batch.getId(), action, base, sheetSettings, itemDetails);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 3. streamFile — 스토리지 파일 서버 중계 스트리밍
+    // 3. streamFile — token 기반 파일 스트리밍 (하위 호환용)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * 미들웨어가 요청한 파일을 스토리지에서 스트리밍으로 중계한다.
-     * 미들웨어는 NCP 자격증명 없이 이 엔드포인트로만 파일을 다운로드한다.
+     * fileUuid 기반 다운로드(streamFileByUuid)가 주 방식이며,
+     * 이 메서드는 하위 호환 또는 내부 테스트용으로 유지한다.
      *
-     * fileType 허용값:
-     *   - "sample" : WRITE 전용 — sampleId 기반 샘플 엑셀 파일
-     *   - "origin" : 결재 전용 — report/{reportId}/origin.xlsx (향후 확장)
-     *
-     * @param token    잡 토큰 (유효성 확인용)
-     * @param fileType 파일 종류
+     * @param token    잡 토큰
+     * @param fileType 파일 종류 ("sample" 만 허용)
      */
     @Transactional(readOnly = true)
     public ResponseEntity<Resource> streamFile(String token, String fileType) {
@@ -273,6 +295,37 @@ public class ExcelWorkServiceImpl {
         };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. streamFileByUuid — fileUuid 기반 파일 스트리밍 (미들웨어 on-demand 다운로드)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * fileUuid 로 item을 조회하여 해당 배치의 샘플 파일을 스트리밍으로 중계한다.
+     *
+     * 미들웨어는 item별 fileUuid 를 JSON에서 받아 이 엔드포인트를 호출하여
+     * 처리 시점에 파일을 on-demand 로 다운로드한다.
+     * 미들웨어가 처리하는 시점에만 다운로드하므로 N건을 미리 내려받지 않아도 된다.
+     *
+     * @param fileUuid item별 파일 식별 UUID
+     */
+    @Transactional(readOnly = true)
+    public ResponseEntity<Resource> streamFileByUuid(String fileUuid) {
+        // fileUuid → item → batch → 샘플 파일 순서로 조회
+        ReportJobItem item = itemRepository.findByFileUuid(fileUuid)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "유효하지 않은 fileUuid 입니다. (fileUuid: " + fileUuid + ")"));
+
+        ReportJobBatch batch = batchRepository.findById(item.getBatchId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "배치를 찾을 수 없습니다. (batchId: " + item.getBatchId() + ")"));
+
+        log.info("파일 스트리밍 요청 — fileUuid: {}, batchId: {}, reportId: {}",
+                fileUuid, batch.getId(), item.getReportId());
+
+        // WRITE 타입: 샘플 파일 스트리밍
+        return streamSampleFile(batch);
+    }
+
     /**
      * 샘플 파일 스트리밍.
      * file_info 에서 refTableName='sample', refTableId=sampleId 로 파일 조회 후 스트리밍.
@@ -282,7 +335,6 @@ public class ExcelWorkServiceImpl {
             throw new IllegalArgumentException("이 배치는 sampleId 가 없습니다. (batchId: " + batch.getId() + ")");
         }
 
-        // sample 에 연결된 파일 조회 (첫 번째 visible 파일 사용)
         List<FileInfo> sampleFiles = fileInfoRepository
                 .findByRefTableNameAndRefTableIdAndIsVisible("sample", batch.getSampleId(), YnType.y);
         if (sampleFiles.isEmpty()) {
@@ -341,20 +393,20 @@ public class ExcelWorkServiceImpl {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 4. callbackReady — 미들웨어 READY 콜백
+    // 5. callbackReady — 미들웨어 READY 콜백
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * 미들웨어가 파일 다운로드 완료 후 작업 시작 직전에 호출.
+     * 미들웨어가 잡 JSON 수신 후 처리 시작 직전에 호출.
      * batch status READY → PROGRESS, startDatetime 기록.
-     * item status READY → PROGRESS (일괄).
+     * item 전체 + 연관 성적서 writeStatus → PROGRESS.
      */
     @Transactional
     public void callbackReady(String token) {
         ReportJobBatch batch = findBatchByToken(token);
 
         if (batch.getStatus() != BatchStatus.READY) {
-            log.warn("callbackReady 호출 시 배치 상태가 READY 가 아님 — 무시 (token: {}, status: {})",
+            log.warn("callbackReady: 배치 상태가 READY 가 아님 — 무시 (token: {}, status: {})",
                     token, batch.getStatus());
             return;
         }
@@ -362,22 +414,20 @@ public class ExcelWorkServiceImpl {
         batch.setStatus(BatchStatus.PROGRESS);
         batch.setStartDatetime(LocalDateTime.now());
 
-        // item 전체 PROGRESS 전환
         List<ReportJobItem> items = itemRepository.findByBatchId(batch.getId());
         items.forEach(item -> {
             item.setStatus(JobItemStatus.PROGRESS);
             item.setStartDatetime(LocalDateTime.now());
         });
 
-        // 연관 성적서 writeStatus → PROGRESS (미들웨어 실제 작업 시작)
         items.forEach(item -> reportRepository.findById(item.getReportId())
                 .ifPresent(r -> r.setWriteStatus(AppStatus.PROGRESS)));
 
-        log.info("callbackReady 처리 완료 — batchId: {}, token: {}", batch.getId(), token);
+        log.info("callbackReady 처리 완료 — batchId: {}, 건수: {}", batch.getId(), items.size());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 5. callbackItemDone — 미들웨어 단건 완료 콜백
+    // 6. callbackItemDone — 미들웨어 단건 완료 콜백
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
@@ -389,7 +439,8 @@ public class ExcelWorkServiceImpl {
      *  3. item status → SUCCESS + endDatetime
      *  4. Report.writeStatus → SUCCESS + writeDatetime
      *  5. batch.successCount++
-     *  6. 전체 완료 여부 확인 (마지막 item이면 batch 최종 처리)
+     *  6. log 테이블 기록
+     *  7. 전체 완료 여부 확인 (마지막 item이면 batch 최종 처리)
      *
      * @param token   잡 토큰 (배치 소속 확인용)
      * @param itemId  처리 완료된 item id
@@ -402,7 +453,6 @@ public class ExcelWorkServiceImpl {
         ReportJobItem item = itemRepository.findById(itemId)
                 .orElseThrow(() -> new EntityNotFoundException("item 을 찾을 수 없습니다. (id: " + itemId + ")"));
 
-        // 토큰의 배치와 item 의 배치가 일치하는지 검증
         if (!item.getBatchId().equals(batch.getId())) {
             throw new IllegalArgumentException(
                     "token 의 배치와 item 의 배치가 일치하지 않습니다. (token batchId: "
@@ -430,7 +480,7 @@ public class ExcelWorkServiceImpl {
                         RequestBody.fromInputStream(is, file.getSize())
                 );
             }
-            log.info("성적서 파일 업로드 완료 — key: {}", objectKey);
+            log.info("성적서 파일 업로드 완료 — reportId: {}, key: {}", report.getId(), objectKey);
 
             // ── item SUCCESS 처리 ─────────────────────────────────────────────
             item.setStatus(JobItemStatus.SUCCESS);
@@ -443,6 +493,19 @@ public class ExcelWorkServiceImpl {
             // ── batch successCount++ ──────────────────────────────────────────
             batch.setSuccessCount(batch.getSuccessCount() + 1);
 
+            // ── log 테이블 기록 ────────────────────────────────────────────────
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 성적서작성 완료 — reportId: %d, 성적서번호: %s, batchId: %d",
+                            report.getId(), report.getReportNum(), batch.getId()))
+                    .logType("u")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+
         } catch (Exception e) {
             log.error("callbackItemDone 처리 실패 — itemId: {}, reportId: {}: {}",
                     itemId, report.getId(), e.getMessage(), e);
@@ -453,9 +516,22 @@ public class ExcelWorkServiceImpl {
 
             report.setWriteStatus(AppStatus.FAIL);
             batch.setFailCount(batch.getFailCount() + 1);
+
+            // ── 실패 로그 기록 ─────────────────────────────────────────────────
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 성적서작성 실패 — reportId: %d, 성적서번호: %s, 오류: %s",
+                            report.getId(), report.getReportNum(), e.getMessage()))
+                    .logType("e")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
         }
 
-        // ── 전체 완료 여부 확인 (마지막 item 이면 배치 최종 처리) ────────────
+        // ── 전체 완료 여부 확인 ──────────────────────────────────────────────
         int processed = batch.getSuccessCount() + batch.getFailCount();
         if (processed >= batch.getTotalCount()) {
             finalizeBatch(batch);
@@ -463,19 +539,18 @@ public class ExcelWorkServiceImpl {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 6. callbackDone — 전체 완료 콜백
+    // 7. callbackDone — 전체 완료 콜백
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * 미들웨어가 모든 item 처리를 완료한 후 호출.
-     * item-done 콜백에서 이미 finalizeBatch 가 호출됐을 수 있지만,
-     * 미들웨어 측에서 명시적으로 완료를 알리는 용도로 추가적으로 처리한다.
+     * item-done 콜백에서 이미 finalizeBatch 가 호출됐을 수 있으나
+     * 미들웨어 측 명시적 완료 알림으로 재처리 (멱등).
      */
     @Transactional
     public void callbackDone(String token) {
         ReportJobBatch batch = findBatchByToken(token);
 
-        // 이미 완료된 경우 무시
         if (batch.getStatus() == BatchStatus.SUCCESS || batch.getStatus() == BatchStatus.FAIL) {
             log.info("callbackDone: 이미 완료 상태 — 무시 (batchId: {}, status: {})",
                     batch.getId(), batch.getStatus());
@@ -483,27 +558,27 @@ public class ExcelWorkServiceImpl {
         }
 
         finalizeBatch(batch);
-        log.info("callbackDone 처리 완료 — batchId: {}, token: {}", batch.getId(), token);
+        log.info("callbackDone 처리 완료 — batchId: {}", batch.getId());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 7. resetBatches — 비정상 종료 복구
+    // 8. resetBatches — 비정상 종료 복구
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * READY 또는 PROGRESS 상태로 고착된 배치를 CANCELED 로 전환하고
-     * 연관 성적서의 writeStatus 를 IDLE 로 복구한다.
+     * 주어진 성적서 id 목록 기준으로 READY/PROGRESS 상태의 활성 배치를 찾아
+     * CANCELED 로 전환하고 연관 성적서의 writeStatus 를 IDLE 로 복구한다.
+     * 이미 SUCCESS 인 item 의 성적서는 SUCCESS 상태를 유지한다.
      *
-     * 이미 SUCCESS 인 item 의 성적서는 SUCCESS 상태를 유지하여 중복 처리를 방지한다.
-     *
-     * @param batchIds 초기화할 배치 id 목록
-     * @param memberId 요청자 id (로그 기록용)
+     * @param reportIds 복구 대상 성적서 id 목록
+     * @param memberId  요청자 id (로그 기록용)
      */
     @Transactional
-    public void resetBatches(List<Long> batchIds, Long memberId) {
-        List<ReportJobBatch> batches = batchRepository.findAllById(batchIds);
+    public void resetBatches(List<Long> reportIds, Long memberId) {
+        // 성적서 id로 활성 배치(READY/PROGRESS) 조회
+        List<ReportJobBatch> batches = batchRepository.findActiveByReportIds(reportIds);
         if (batches.isEmpty()) {
-            throw new EntityNotFoundException("초기화할 배치가 없습니다.");
+            throw new EntityNotFoundException("복구할 활성 배치가 없습니다. (READY/PROGRESS 상태인 배치 없음)");
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -514,20 +589,16 @@ public class ExcelWorkServiceImpl {
                 continue;
             }
 
-            // 배치 CANCELED 처리
             batch.setStatus(BatchStatus.CANCELED);
             batch.setEndDatetime(now);
 
-            // item 별 처리
             List<ReportJobItem> items = itemRepository.findByBatchId(batch.getId());
             for (ReportJobItem item : items) {
-                // 이미 SUCCESS 인 item 은 유지 (파일이 스토리지에 올라가 있음)
                 if (item.getStatus() == JobItemStatus.SUCCESS) continue;
 
                 item.setStatus(JobItemStatus.CANCELED);
                 item.setEndDatetime(now);
 
-                // 성적서 writeStatus IDLE 복구 (SUCCESS 아닌 것만)
                 reportRepository.findById(item.getReportId()).ifPresent(r -> {
                     if (r.getWriteStatus() != AppStatus.SUCCESS) {
                         r.setWriteStatus(AppStatus.IDLE);
@@ -560,11 +631,7 @@ public class ExcelWorkServiceImpl {
                         "유효하지 않은 token 입니다. (token: " + token + ")"));
     }
 
-    /**
-     * 배치 최종 완료 처리.
-     * successCount/failCount 기준으로 batch status 를 SUCCESS 또는 FAIL 로 확정.
-     * endDatetime 을 현재 시각으로 설정.
-     */
+    /** 배치 최종 완료 처리. successCount/failCount 기준으로 SUCCESS/FAIL 확정. */
     private void finalizeBatch(ReportJobBatch batch) {
         batch.setEndDatetime(LocalDateTime.now());
         batch.setStatus(batch.getFailCount() > 0 ? BatchStatus.FAIL : BatchStatus.SUCCESS);
@@ -582,5 +649,86 @@ public class ExcelWorkServiceImpl {
             return true;
         }
         return excelworkCallbackKey.equals(callbackKey);
+    }
+
+    /** serverUrl 파라미터가 비어있으면 설정값 폴백 */
+    private String resolveServerUrl(String serverUrl) {
+        return (serverUrl != null && !serverUrl.isBlank()) ? serverUrl : callbackBaseUrl;
+    }
+
+    /**
+     * ReportFillDataRes 를 fieldCode → 값(String) 맵으로 변환.
+     *
+     * 변환 규칙:
+     *   - LocalDate : ISO 8601 문자열 "yyyy-MM-dd" (미들웨어가 format 에 따라 재변환)
+     *   - Integer   : 숫자 문자열 (예: "12")
+     *   - null 값   : null 그대로 포함 (미들웨어가 빈 문자열로 처리)
+     *   - 내부 메타데이터(sampleFileId 등)는 포함하지 않음
+     */
+    private Map<String, String> buildDataMap(WorkerDataDTO.ReportFillDataRes d) {
+        Map<String, String> map = new LinkedHashMap<>();
+
+        // 신청업체
+        map.put("custAgent",      d.getCustAgent());
+        map.put("custAgentEn",    d.getCustAgentEn());
+        map.put("custAgentAddr",  d.getCustAgentAddr());
+        map.put("custAgentAddrEn", d.getCustAgentAddrEn());
+
+        // 접수/성적서 번호
+        map.put("orderNum",  d.getOrderNum());
+        map.put("reportNum", d.getReportNum());
+
+        // 분류코드
+        map.put("middleItemCodeNum", d.getMiddleItemCodeNum());
+        map.put("smallItemCodeNum",  d.getSmallItemCodeNum());
+
+        // 기기 정보
+        map.put("itemName",    d.getItemName());
+        map.put("itemNameEn",  d.getItemNameEn());
+        map.put("makeAgent",   d.getMakeAgent());
+        map.put("makeAgentEn", d.getMakeAgentEn());
+        map.put("format",      d.getFormat());
+        map.put("itemNum",     d.getItemNum());
+        map.put("assetNum",    d.getAssetNum());
+
+        // 교정 정보
+        map.put("caliAddress",   d.getCaliAddress());
+        map.put("siteAddr",      d.getSiteAddr());
+        map.put("siteAddrEn",    d.getSiteAddrEn());
+        map.put("caliDate",      localDateToStr(d.getCaliDate()));
+        map.put("itemCaliCycle", d.getItemCaliCycle() != null ? d.getItemCaliCycle().toString() : null);
+        map.put("approvalDate",  localDateToStr(d.getApprovalDate()));
+
+        // 환경 데이터
+        map.put("tempMin", d.getTempMin());
+        map.put("tempMax", d.getTempMax());
+        map.put("humMin",  d.getHumMin());
+        map.put("humMax",  d.getHumMax());
+        map.put("preMin",  d.getPreMin());
+        map.put("preMax",  d.getPreMax());
+
+        // 담당자
+        map.put("worker",      d.getWorker());
+        map.put("workerEn",    d.getWorkerEn());
+        map.put("approval",    d.getApproval());
+        map.put("approvalEn",  d.getApprovalEn());
+
+        // 소급성 문구
+        map.put("traceStatement",    d.getTraceStatement());
+        map.put("traceStatement2",   d.getTraceStatement2());
+        map.put("traceStatement3",   d.getTraceStatement3());
+        map.put("traceStatementEn",  d.getTraceStatementEn());
+        map.put("traceStatementEn2", d.getTraceStatementEn2());
+        map.put("traceStatementEn3", d.getTraceStatementEn3());
+
+        // 성적서 언어
+        map.put("reportLang", d.getReportLang());
+
+        return map;
+    }
+
+    /** LocalDate → ISO 8601 문자열 ("yyyy-MM-dd"). null이면 null 반환. */
+    private String localDateToStr(LocalDate date) {
+        return date != null ? date.toString() : null;
     }
 }

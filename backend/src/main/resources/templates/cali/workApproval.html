@@ -13,6 +13,7 @@
 
                         <!-- 버튼 그룹: 기능별 색상 구분 -->
                         <button type="button" class="btn btn-primary btn-sm btnWriteReport">성적서작성</button>
+                        <button type="button" class="btn btn-secondary btn-sm btnWriteReset">비정상 종료 복구</button>
                         <button type="button" class="btn btn-warning btn-sm btnWaitChange">성적서대기변경</button>
                         <button type="button" class="btn btn-success btn-sm btnBulkEdit">통합수정</button>
                         <button type="button" class="btn btn-info btn-sm btnMultiApproval">성적서 다중결재</button>
@@ -60,7 +61,19 @@
                             </select>
                         </div>
 
-                        <!-- 검색필터3: 접수구분 -->
+                        <!-- 검색필터3: 성적서작성 상태 (write_status) -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <select class="form-control form-control-sm writeStatusFilter" style="width: 95px;">
+                                <option value="" selected>작성상태</option>
+                                <option value="IDLE">미작성</option>
+                                <option value="READY">작성대기</option>
+                                <option value="PROGRESS">작성중</option>
+                                <option value="SUCCESS">작성완료</option>
+                                <option value="FAIL">작성실패</option>
+                            </select>
+                        </div>
+
+                        <!-- 검색필터4: 접수구분 -->
                         <div class="input-group input-group-sm" style="width: auto;">
                             <select class="form-control form-control-sm orderTypeFilter" style="width: 95px;">
                                 <option value="" selected>구분전체</option>

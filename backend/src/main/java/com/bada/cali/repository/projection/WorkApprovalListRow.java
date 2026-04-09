@@ -50,6 +50,9 @@ public interface WorkApprovalListRow {
 	String getApprovalMemberName();  // 기술책임자 이름 (member.name JOIN)
 
 	// ── 파일 다운로드 컬럼 (file_info 서브쿼리 — 없으면 null) ─────────────────
+	/** 성적서작성(ExcelWork) 상태 (IDLE/READY/PROGRESS/SUCCESS/FAIL) */
+	String getWriteStatus();
+
 	/** 원본 성적서 엑셀 file_info.id (name='report_origin') */
 	Long getOriginFileId();
 

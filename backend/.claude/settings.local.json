@@ -35,7 +35,10 @@
       "Bash(find /c/BadaDev/cali/backend/src/main/resources/static -type f \\\\\\(-name *.css -o -name *.scss \\\\\\) -newer /c/BadaDev/cali/backend/src/main/resources/templates/cali/workApproval.html)",
       "Bash(xargs grep:*)",
       "Bash(grep -r \"sign\\\\|서명\\\\|signature\" C:BadaDevcalibackendsrcmainresourcesstaticjs --include=*.js -l)",
-      "Bash(./gradlew compileJava)"
+      "Bash(./gradlew compileJava)",
+      "Read(//c/Users/gnjqt/.jdks//**)",
+      "Read(//c//**)",
+      "Bash(JAVA_HOME=\"/c/Users/gnjqt/.jdks/corretto-17.0.18\" ./gradlew compileJava)"
     ]
   }
 }

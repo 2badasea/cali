@@ -558,6 +558,10 @@ public class ReportServiceImpl {
 		String workStatus = request.getWorkStatus();
 		workStatus = (workStatus == null || workStatus.isBlank()) ? null : workStatus;
 
+		// 성적서작성(ExcelWork) 상태: 빈값 → null (전체 조회)
+		String writeStatus = request.getWriteStatus();
+		writeStatus = (writeStatus == null || writeStatus.isBlank()) ? null : writeStatus;
+
 		// 접수구분: null이면 전체
 		OrderType orderTypeEnum = request.getOrderType();
 		String orderType = (orderTypeEnum == null) ? null : orderTypeEnum.name();
@@ -577,13 +581,13 @@ public class ReportServiceImpl {
 		keyword = (keyword == null) ? "" : keyword.trim();
 
 		List<WorkApprovalListRow> pageResult = reportRepository.searchWorkApprovalList(
-				reportStatus, workStatus, orderType,
+				reportStatus, workStatus, writeStatus, orderType,
 				middleItemCodeId, smallItemCodeId,
 				searchType, keyword, pageable
 		);
 
 		long totalCount = reportRepository.countWorkApprovalList(
-				reportStatus, workStatus, orderType,
+				reportStatus, workStatus, writeStatus, orderType,
 				middleItemCodeId, smallItemCodeId,
 				searchType, keyword
 		);

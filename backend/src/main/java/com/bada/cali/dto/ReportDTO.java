@@ -67,6 +67,7 @@ public class ReportDTO {
 		private String keyword;          // 검색키워드
 		private String reportStatus;     // 진행상태 (WAIT, WORK_RETURN, APPROV_RETURN, REUPLOAD, REPAIR, IMPOSSIBLE, CANCEL, COMPLETE) — 빈값이면 전체
 		private String workStatus;       // 실무자 결재상태 (IDLE, READY, PROGRESS, FAIL, SUCCESS) — 기본 IDLE
+		private String writeStatus;      // 성적서작성(ExcelWork) 상태 (IDLE, READY, PROGRESS, SUCCESS, FAIL) — 빈값이면 전체
 		private OrderType orderType;     // 접수구분 (null이면 전체)
 		private Long middleItemCodeId;   // 중분류코드 id (0 또는 null이면 전체)
 		private Long smallItemCodeId;    // 소분류코드 id (0 또는 null이면 전체)

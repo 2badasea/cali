@@ -43,6 +43,15 @@ public class ReportJobItem {
     private Long reportId;
 
     /**
+     * ExcelWork 미들웨어 파일 다운로드 식별 UUID.
+     * WRITE 배치 생성(createJob) 시 item별로 UUID가 부여된다.
+     * 미들웨어는 이 UUID로 GET /api/excelwork/file/{fileUuid} 를 호출해 파일을 다운로드한다.
+     * cali-worker 방식 배치는 NULL.
+     */
+    @Column(name = "file_uuid", length = 36, unique = true)
+    private String fileUuid;
+
+    /**
      * 개별 처리 상태
      * READY → PROGRESS → SUCCESS / FAIL
      * 취소 시: CANCELED

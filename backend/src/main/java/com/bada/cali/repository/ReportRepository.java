@@ -346,6 +346,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			    r.item_format                                         AS itemFormat,
 			    r.report_status                                       AS reportStatus,
 			    r.work_status                                         AS workStatus,
+			    r.write_status                                        AS writeStatus,
 			    r.order_type                                          AS orderType,
 			    wr.name                                               AS writeMemberName,
 			    r.work_member_id                                     AS workMemberId,
@@ -380,6 +381,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.parent_scale_id   IS NULL
 			  AND (:reportStatus IS NULL OR r.report_status  = :reportStatus)
 			  AND (:workStatus   IS NULL OR r.work_status    = :workStatus)
+			  AND (:writeStatus  IS NULL OR r.write_status   = :writeStatus)
 			  AND (:orderType    IS NULL OR r.order_type     = :orderType)
 			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
 			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
@@ -422,6 +424,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 	List<WorkApprovalListRow> searchWorkApprovalList(
 			@Param("reportStatus") String reportStatus,
 			@Param("workStatus") String workStatus,
+			@Param("writeStatus") String writeStatus,
 			@Param("orderType") String orderType,
 			@Param("middleItemCodeId") Long middleItemCodeId,
 			@Param("smallItemCodeId") Long smallItemCodeId,
@@ -445,6 +448,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.parent_scale_id   IS NULL
 			  AND (:reportStatus IS NULL OR r.report_status  = :reportStatus)
 			  AND (:workStatus   IS NULL OR r.work_status    = :workStatus)
+			  AND (:writeStatus  IS NULL OR r.write_status   = :writeStatus)
 			  AND (:orderType    IS NULL OR r.order_type     = :orderType)
 			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
 			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
@@ -478,6 +482,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 	long countWorkApprovalList(
 			@Param("reportStatus") String reportStatus,
 			@Param("workStatus") String workStatus,
+			@Param("writeStatus") String writeStatus,
 			@Param("orderType") String orderType,
 			@Param("middleItemCodeId") Long middleItemCodeId,
 			@Param("smallItemCodeId") Long smallItemCodeId,
