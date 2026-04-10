@@ -18,7 +18,12 @@
       "Bash(curl -L -o \"c:/BadaDev/cali/backend/src/main/resources/static/vendor/tui-editor/toastui-editor.min.css\" \"https://uicdn.toast.com/editor/latest/toastui-editor.min.css\")",
       "Bash(xargs ls:*)",
       "Bash(grep -rn \"gGrid\\\\|g_grid\" c:/BadaDev/cali/backend/src/main/resources/static/js/ --include=*.js -l)",
-      "Bash(grep -rn \"QueryDsl\\\\|querydsl\\\\|QAlarm\\\\|JPAQueryFactory\" c:/BadaDev/cali/backend/src/main/java/com/bada/cali/ --include=*.java -l)"
+      "Bash(grep -rn \"QueryDsl\\\\|querydsl\\\\|QAlarm\\\\|JPAQueryFactory\" c:/BadaDev/cali/backend/src/main/java/com/bada/cali/ --include=*.java -l)",
+      "Bash(mkdir -p \"c:/BadaDev/cali/docs/review/홈서버_미니PC_Ubuntu_서버_구축\")",
+      "Bash(cp __TRACKED_VAR__/image.png __TRACKED_VAR__/img00.png)",
+      "Bash(cp '__TRACKED_VAR__/image 1.png' __TRACKED_VAR__/img01.png)",
+      "Bash(cp '__TRACKED_VAR__/image 2.png' __TRACKED_VAR__/img02.png)",
+      "Bash(cp '__TRACKED_VAR__/image 3.png' __TRACKED_VAR__/img03.png)"
     ]
   }
 }
