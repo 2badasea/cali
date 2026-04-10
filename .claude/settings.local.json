@@ -23,7 +23,23 @@
       "Bash(cp __TRACKED_VAR__/image.png __TRACKED_VAR__/img00.png)",
       "Bash(cp '__TRACKED_VAR__/image 1.png' __TRACKED_VAR__/img01.png)",
       "Bash(cp '__TRACKED_VAR__/image 2.png' __TRACKED_VAR__/img02.png)",
-      "Bash(cp '__TRACKED_VAR__/image 3.png' __TRACKED_VAR__/img03.png)"
+      "Bash(cp '__TRACKED_VAR__/image 3.png' __TRACKED_VAR__/img03.png)",
+      "Bash(mkdir -p C:/BadaDev/my-obsidian/개발공부/infra C:/BadaDev/my-obsidian/개발공부/backend C:/BadaDev/my-obsidian/개발공부/frontend C:/BadaDev/my-obsidian/개발공부/architecture C:/BadaDev/my-obsidian/개발공부/프로젝트/cali)",
+      "Bash(cp c:/BadaDev/cali/docs/review/홈서버_미니PC_Ubuntu_서버_구축.md C:/BadaDev/my-obsidian/개발공부/infra/)",
+      "Bash(cp -r c:/BadaDev/cali/docs/review/홈서버_미니PC_Ubuntu_서버_구축 C:/BadaDev/my-obsidian/개발공부/infra/)",
+      "Bash(cp c:/BadaDev/cali/docs/review/홈서버_Docker_CICD_배포_구축_실습기.md C:/BadaDev/my-obsidian/개발공부/infra/)",
+      "Bash(cp c:/BadaDev/cali/docs/review/도메인_DNS_Nginx_인프라_연결_가이드.md C:/BadaDev/my-obsidian/개발공부/infra/)",
+      "Bash(rm -rf \"C:/BadaDev/my-obsidian/개발공부/프로젝트/교정관리\")",
+      "Bash(mv \"C:/BadaDev/my-obsidian/개발공부/프로젝트\" \"C:/BadaDev/my-obsidian/개발공부/project\")",
+      "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(1to20\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(1to20\\).md\")",
+      "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(21to40\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(21to40\\).md\")",
+      "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(41to60\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(41to60\\).md\")"
+    ],
+    "additionalDirectories": [
+      "C:\\BadaDev\\my-obsidian\\개발공부\\architecture",
+      "C:\\BadaDev\\my-obsidian\\개발공부\\backend",
+      "C:\\BadaDev\\my-obsidian\\개발공부\\frontend",
+      "C:\\BadaDev\\my-obsidian\\개발공부\\project\\cali"
     ]
   }
 }
