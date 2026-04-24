@@ -155,65 +155,168 @@ $(function () {
 	}
 
 	// =====================================================================
-	// WorkApprovalCellRenderer: 업로드 컬럼을 결재 트리거 버튼으로 대체
-	// - originFileId 없음: 빈 셀 (성적서 미작성 상태 — 결재 불가)
-	// - originFileId 있음: 결재 아이콘 버튼 → 클릭 시 WORK_APPROVAL 배치 트리거
+	// WorkApprovalCellRenderer: 업로드(input[type=file]) + 조건부 결재 버튼
+	// - input[type=file] : 항상 표시 — 파일 선택 시 handleSingleFileUpload() 호출
+	// - 결재 버튼        : originFileId 있을 때만 표시 → doWorkApproval() 호출
 	// =====================================================================
 	class WorkApprovalCellRenderer {
 		constructor(props) {
 			this.el = document.createElement('div');
-			this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
+			this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:2px; width:100%; height:100%; min-height:28px;';
 			this.render(props);
 		}
 
 		render(props) {
-			const row = props.grid.getRow(props.rowKey);
+			const row       = props.grid.getRow(props.rowKey);
 			const hasOrigin = !!(row && row.originFileId);
+			const reportId  = row?.id;
+			const reportNum = row?.reportNum ?? '';
 
-			if (!hasOrigin) {
-				// 성적서 미작성 — 결재 불가
-				this.el.innerHTML = '';
-				return;
-			}
+			// 업로드 버튼 (숨겨진 input + label)
+			const label = document.createElement('label');
+			label.className = 'btn btn-sm btn-outline-secondary mb-0';
+			label.style.cssText = 'cursor:pointer; padding:2px 5px; font-size:0.75rem; line-height:1.4;';
+			label.title = '파일 업로드';
+			label.innerHTML = '<i class="bi bi-upload"></i>';
 
-			const reportId  = row.id;
-			const reportNum = row.reportNum ?? '';
+			const input = document.createElement('input');
+			input.type   = 'file';
+			input.accept = '.xlsx,.xls';
+			input.style.display = 'none';
+			label.appendChild(input);
 
-			// 결재 아이콘 버튼 (bi-pen-fill: 서명/결재 이미지 연상)
-			this.el.innerHTML =
-				`<button class="btn btn-sm btn-warning w-100" style="height:100%; min-height:28px;" title="실무자결재">` +
-				`<i class="bi bi-pen-fill"></i></button>`;
-
-			this.el.querySelector('button').addEventListener('click', (e) => {
+			input.addEventListener('change', (e) => {
 				e.stopPropagation();
-				doWorkApproval([reportId], reportNum);
+				const file = e.target.files[0];
+				if (!file) return;
+				handleSingleFileUpload(reportId, reportNum, file, input);
 			});
+
+			this.el.appendChild(label);
+
+			// 결재 버튼 (원본 파일 있을 때만)
+			if (hasOrigin) {
+				const btn = document.createElement('button');
+				btn.className = 'btn btn-sm btn-warning';
+				btn.style.cssText = 'padding:2px 5px; font-size:0.75rem; line-height:1.4;';
+				btn.title = '실무자결재';
+				btn.innerHTML = '<i class="bi bi-pen-fill"></i>';
+				btn.addEventListener('click', (e) => {
+					e.stopPropagation();
+					doWorkApproval([reportId], reportNum);
+				});
+				this.el.appendChild(btn);
+			}
 		}
 
 		getElement() { return this.el; }
 	}
 
 	// =====================================================================
-	// doWorkApproval: WORK_APPROVAL 배치 생성 + 폴링 진행상황 표시
-	// reportIds: 결재 대상 성적서 id 배열 (단건 또는 다중)
-	// representReportNum: 타이틀용 성적서번호 (다중 시 "외 N건" 형태로 표시)
+	// handleSingleFileUpload: 그리드 단건 업로드/결재
+	// 파일 선택 → 확장자·파일명 검증 → 결재/업로드/취소 선택 → 처리
 	// =====================================================================
-	async function doWorkApproval(reportIds, representReportNum) {
+	async function handleSingleFileUpload(reportId, reportNum, file, inputEl) {
+		// 확장자 검증
+		const ext = file.name.split('.').pop().toLowerCase();
+		if (!['xlsx', 'xls'].includes(ext)) {
+			gToast('엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.', 'warning');
+			inputEl.value = '';
+			return;
+		}
+
+		// 파일명(확장자 제거) = 성적서번호 일치 검증
+		const fileNameBase = file.name.replace(/\.[^/.]+$/, '');
+		if (fileNameBase !== reportNum) {
+			gToast(`파일명(${fileNameBase})이 성적서번호(${reportNum})와 일치하지 않습니다.`, 'warning');
+			inputEl.value = '';
+			return;
+		}
+
+		// 결재 / 업로드 / 취소 선택
+		const result = await Swal.fire({
+			title: '성적서 업로드',
+			html: `<strong>${reportNum}</strong>에 대해 진행할 작업을 선택해주세요.`,
+			icon: 'question',
+			showDenyButton: true,
+			showCancelButton: true,
+			confirmButtonText: '결재',
+			denyButtonText: '업로드',
+			cancelButtonText: '취소',
+		});
+
+		if (result.isDismissed) {
+			// 취소
+			inputEl.value = '';
+			return;
+		}
+
+		const isApproval = result.isConfirmed;
+
+		// 원본 파일 업로드 (CALI 서버)
+		try {
+			gLoadingMessage(isApproval ? '파일 업로드 중...' : '원본 파일 교체 중...');
+			const formData = new FormData();
+			formData.append('files', file);
+			formData.append('reportIds', reportId);
+
+			const uploadRes = await fetch('/api/report/upload/origin', {
+				method: 'POST',
+				body: formData,
+			});
+			swal.close();
+			if (!uploadRes.ok) throw uploadRes;
+			const uploadData = await uploadRes.json();
+			if (!uploadData || uploadData.code <= 0) {
+				await gMessage('오류', uploadData.msg ?? '파일 업로드 중 오류가 발생했습니다.', 'error', 'alert');
+				inputEl.value = '';
+				return;
+			}
+		} catch (err) {
+			swal.close();
+			customAjaxHandler(err);
+			inputEl.value = '';
+			return;
+		}
+
+		inputEl.value = '';
+
+		if (!isApproval) {
+			// 업로드만
+			await gMessage('업로드 완료', `${reportNum} 원본 파일이 교체되었습니다.`, 'success', 'alert');
+			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
+			$modal.grid.getPagination().movePageTo(currentPage);
+			return;
+		}
+
+		// 결재: 배치 생성 + 폴링
+		await doWorkApproval([reportId], reportNum, true);
+	}
+
+	// =====================================================================
+	// doWorkApproval: WORK_APPROVAL 배치 생성 + 폴링 진행상황 표시
+	// reportIds      : 결재 대상 성적서 id 배열 (단건 또는 다중)
+	// representReportNum: 타이틀용 성적서번호 (다중 시 "외 N건" 형태로 표시)
+	// skipConfirm    : true이면 결재 확인 다이얼로그 생략 (다중결재·단건 업로드 결재 시 사용)
+	// =====================================================================
+	async function doWorkApproval(reportIds, representReportNum, skipConfirm = false) {
 		if (!reportIds || reportIds.length === 0) return;
 
 		const titleSuffix = reportIds.length === 1
 			? `[${representReportNum}]`
 			: `[${representReportNum} 외 ${reportIds.length - 1}건]`;
 
-		// ── Step 1. 결재 확인 ────────────────────────────────────────────
-		const confirmResult = await gMessage(
-			'실무자결재',
-			`${titleSuffix}<br>선택한 성적서를 실무자결재 처리하시겠습니까?`,
-			'question',
-			'confirm',
-			{ confirmButtonText: '결재' }
-		);
-		if (!confirmResult.isConfirmed) return;
+		// ── Step 1. 결재 확인 (skipConfirm 시 생략) ──────────────────────
+		if (!skipConfirm) {
+			const confirmResult = await gMessage(
+				'실무자결재',
+				`${titleSuffix}<br>선택한 성적서를 실무자결재 처리하시겠습니까?`,
+				'question',
+				'confirm',
+				{ confirmButtonText: '결재' }
+			);
+			if (!confirmResult.isConfirmed) return;
+		}
 
 		// ── Step 2. 배치 생성 API 호출 ────────────────────────────────────
 		let batchId;
@@ -476,6 +579,7 @@ $(function () {
 			{
 				header: '기기명',
 				name: 'itemName',
+				width: 200,
 				align: 'center',
 				className: 'cursor_pointer',
 				whiteSpace: 'pre-line',
@@ -555,11 +659,12 @@ $(function () {
 				renderer: { type: ReportFileDownloadRenderer },
 			},
 			{
-				// 결재 컬럼: originFileId 존재 시 결재 버튼 표시 (WorkApprovalCellRenderer)
-				// originFileId 없으면 빈 셀 — 성적서작성 미완료 상태
-				header: '결재',
+				// 업로드/결재 컬럼
+				// - input[type=file] : 항상 표시 (원본 파일 업로드 또는 교체)
+				// - 결재 버튼        : originFileId 있을 때만 표시 (실무자결재 트리거)
+				header: '업로드/결재',
 				name: 'uploadBtn',
-				width: 55,
+				width: 95,
 				align: 'center',
 				sortable: false,
 				renderer: {
@@ -760,6 +865,22 @@ $(function () {
 				customAjaxHandler(err);
 			}
 		})
+		// 버튼: 성적서업로드 → 성적서업로드 모달 호출
+		.on('click', '.btnReportUpload', async function () {
+			await gModal(
+				'/cali/reportUpload',
+				{},
+				{
+					title: '성적서업로드',
+					size: 'sm',
+					show_close_button: true,
+					show_confirm_button: false,
+				}
+			);
+			// 모달 닫힘 후 그리드 재조회 (업로드·결재 완료 반영)
+			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
+			$modal.grid.getPagination().movePageTo(currentPage);
+		})
 		// 버튼: 성적서대기변경 (준비중)
 		.on('click', '.btnWaitChange', function () {
 			gToast('구현 준비중입니다.', 'info');
@@ -793,11 +914,11 @@ $(function () {
 			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 			$modal.grid.getPagination().movePageTo(currentPage);
 		})
-		// 버튼: 성적서 다중결재
+		// 버튼: 성적서다중결재
 		// 1) 체크된 항목 없으면 warning
-		// 2) originFileId 없는 항목은 결재 불가 — 필터링 후 대상 없으면 안내
-		// 3) workMemberId 기준으로 그룹화 → 그룹별로 doWorkApproval 순차 호출
-		//    (서명 이미지가 실무자별로 다르므로 배치 단위로 실무자가 동일해야 함)
+		// 2) originFileId 없는 항목 필터링
+		// 3) validateWorkApproval API 호출 → 실패 건 SweetAlert 목록 표시
+		// 4) 유효 건만 workMemberId 기준 그룹화 → 그룹별 doWorkApproval 순차 호출
 		.on('click', '.btnMultiApproval', async function () {
 			const checkedRows = $modal.grid.getCheckedRows();
 			if (!checkedRows || checkedRows.length === 0) {
@@ -805,27 +926,97 @@ $(function () {
 				return;
 			}
 
-			// originFileId 있는 항목만 결재 가능
+			// originFileId 있는 항목만 결재 후보
 			const approvalRows = checkedRows.filter(row => !!row.originFileId);
 			if (approvalRows.length === 0) {
 				gToast('결재 가능한 항목이 없습니다. 성적서작성이 완료된 항목을 선택해 주세요.', 'warning');
 				return;
 			}
 
-			// workMemberId 기준으로 그룹화 (Map: workMemberId → 해당 rows 배열)
-			// 서명 이미지가 실무자별로 다르므로 배치 단위로 실무자가 동일해야 함
+			// ── 사전 유효성 검증 API 호출 ─────────────────────────────────────
+			let validateResult;
+			try {
+				gLoadingMessage('유효성 검증 중...');
+				const res = await fetch('/api/report/jobs/validateWorkApproval', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json; charset=utf-8' },
+					body: JSON.stringify({ reportIds: approvalRows.map(r => r.id) }),
+				});
+				swal.close();
+				if (!res.ok) throw res;
+				const resData = await res.json();
+				if (!resData || resData.code <= 0) {
+					await gMessage('오류', resData.msg ?? '유효성 검증 중 오류가 발생했습니다.', 'error', 'alert');
+					return;
+				}
+				validateResult = resData.data;
+			} catch (err) {
+				swal.close();
+				customAjaxHandler(err);
+				return;
+			}
+
+			const { valid, invalid } = validateResult;
+
+			// 전부 실패 → 안내 후 종료
+			if (!valid || valid.length === 0) {
+				const failHtml = (invalid ?? []).map(i =>
+					`<li><strong>${i.reportNum}</strong>: ${i.reason}</li>`
+				).join('');
+				await gMessage(
+					'결재 불가',
+					`<ul class="text-start" style="max-height:200px; overflow-y:auto; font-size:0.85em;">${failHtml}</ul>`,
+					'error', 'alert'
+				);
+				return;
+			}
+
+			// 일부 실패 → 실패 목록 보여주고 유효 건만 진행 여부 확인
+			let confirmed;
+			if (invalid && invalid.length > 0) {
+				const failHtml = invalid.map(i =>
+					`<li><strong>${i.reportNum}</strong>: ${i.reason}</li>`
+				).join('');
+				const result = await gMessage(
+					'일부 결재 불가',
+					`<p style="font-size:0.9em;">아래 <strong>${invalid.length}건</strong>은 결재가 불가능하여 제외됩니다.</p>` +
+					`<ul class="text-start" style="max-height:180px; overflow-y:auto; font-size:0.85em;">${failHtml}</ul>` +
+					`<p style="font-size:0.9em; margin-top:8px;"><strong>${valid.length}건</strong>에 대해 결재를 진행하시겠습니까?</p>`,
+					'warning', 'confirm', { confirmButtonText: '결재' }
+				);
+				confirmed = result.isConfirmed;
+			} else {
+				// 전부 통과 → 결재 확인
+				const firstNum = valid[0].reportNum ?? '';
+				const titleSuffix = valid.length === 1
+					? `[${firstNum}]`
+					: `[${firstNum} 외 ${valid.length - 1}건]`;
+				const result = await gMessage(
+					'실무자결재',
+					`${titleSuffix}<br>선택한 성적서를 실무자결재 처리하시겠습니까?`,
+					'question', 'confirm', { confirmButtonText: '결재' }
+				);
+				confirmed = result.isConfirmed;
+			}
+
+			if (!confirmed) return;
+
+			// ── 유효 건만 workMemberId 기준 그룹화 → 그룹별 순차 결재 ──────────
+			const validIdSet  = new Set(valid.map(v => v.id));
+			const validRows   = approvalRows.filter(r => validIdSet.has(r.id));
+
 			const groupMap = new Map();
-			for (const row of approvalRows) {
+			for (const row of validRows) {
 				const wid = row.workMemberId ?? 'null';
 				if (!groupMap.has(wid)) groupMap.set(wid, []);
 				groupMap.get(wid).push(row);
 			}
 
-			// 그룹별로 순차 처리 (각 그룹마다 별도 확인 + 별도 배치 + 별도 폴링)
 			for (const [, rows] of groupMap) {
-				const reportIds      = rows.map(r => r.id);
-				const firstReportNum = rows[0].reportNum ?? '';
-				await doWorkApproval(reportIds, firstReportNum);
+				const ids      = rows.map(r => r.id);
+				const firstNum = rows[0].reportNum ?? '';
+				// 위에서 이미 confirm 완료 → skipConfirm=true
+				await doWorkApproval(ids, firstNum, true);
 			}
 		});
 

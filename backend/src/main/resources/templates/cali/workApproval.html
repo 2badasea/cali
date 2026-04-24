@@ -11,12 +11,23 @@
                     <!-- 좌측: 버튼 + 행 수 -->
                     <div class="d-flex align-items-center flex-wrap" style="gap: 4px;">
 
-                        <!-- 버튼 그룹: 기능별 색상 구분 -->
-                        <button type="button" class="btn btn-primary btn-sm btnWriteReport">성적서작성</button>
+                        <!-- 성적서작업 드롭다운 (성적서작성 / 성적서업로드 / 성적서다중결재) -->
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-primary btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                성적서작업
+                            </button>
+                            <div class="dropdown-menu">
+                                <button type="button" class="dropdown-item btnWriteReport">성적서작성</button>
+                                <button type="button" class="dropdown-item btnReportUpload">성적서업로드</button>
+                                <div class="dropdown-divider"></div>
+                                <button type="button" class="dropdown-item btnMultiApproval">성적서다중결재</button>
+                            </div>
+                        </div>
+
+                        <!-- 기타 기능 버튼 -->
                         <button type="button" class="btn btn-secondary btn-sm btnWriteReset">비정상 종료 복구</button>
                         <button type="button" class="btn btn-warning btn-sm btnWaitChange">성적서대기변경</button>
                         <button type="button" class="btn btn-success btn-sm btnBulkEdit">통합수정</button>
-                        <button type="button" class="btn btn-info btn-sm btnMultiApproval">성적서 다중결재</button>
 
                         <!-- 행 수 -->
                         <div class="input-group input-group-sm" style="width: auto;">
@@ -119,9 +130,6 @@
 
                 </div>
             </form>
-
-            <!-- 파일 선택 input (숨김 — 업로드 버튼 클릭 시 trigger) -->
-            <input type="file" id="uploadFileInput" accept=".xlsx,.xls" style="display: none;" />
 
             <div class="grid workApprovalList"></div>
         </div>

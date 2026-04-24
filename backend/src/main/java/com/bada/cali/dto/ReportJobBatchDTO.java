@@ -241,4 +241,95 @@ public class ReportJobBatchDTO {
         @Schema(description = "실무자 서명 이미지 objectKey (WORK_APPROVAL 전용)", nullable = true)
         private String workerSignImgKey;
     }
+
+    // ── 성적서 업로드 검증 요청 ──────────────────────────────────────────────
+
+    /**
+     * 성적서 업로드(원본 교체) 사전 검증 요청 DTO
+     *
+     * POST /api/report/upload/validate
+     * 파일명(확장자 제거) 기반으로 성적서를 조회하여 업로드/결재 가능 여부를 반환한다.
+     */
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Schema(description = "성적서 업로드 사전 검증 요청")
+    public static class ValidateUploadReq {
+
+        @NotEmpty(message = "파일명을 1건 이상 전달해야 합니다.")
+        @Schema(description = "업로드할 파일의 파일명 목록 (확장자 제거)", example = "[\"BD26-0004-0001\", \"BD26-0004-0002\"]")
+        private List<String> reportNums;
+
+        /**
+         * 검증 모드
+         * - "upload"   : 업로드만 허용 여부 검증
+         * - "approval" : 업로드 후 결재 가능 여부도 함께 검증
+         */
+        @NotNull(message = "mode는 필수입니다.")
+        @Schema(description = "검증 모드 (upload / approval)", example = "approval")
+        private String mode;
+    }
+
+    // ── 실무자결재 사전 검증 ──────────────────────────────────────────────────
+
+    /**
+     * 실무자결재 사전 검증 요청 DTO
+     *
+     * POST /api/report/jobs/validateWorkApproval
+     * 배치 생성 전 대상 성적서들의 결재 가능 여부를 순수하게 조회한다(사이드이펙트 없음).
+     */
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Schema(description = "실무자결재 사전 검증 요청")
+    public static class ValidateWorkApprovalReq {
+
+        @NotEmpty(message = "대상 성적서를 1건 이상 선택해야 합니다.")
+        @Schema(description = "검증할 성적서 id 목록", example = "[1, 2, 3]")
+        private List<Long> reportIds;
+    }
+
+    /**
+     * 검증 통과/실패 결과 응답 DTO
+     *
+     * validateWorkApproval / ReportUploadService.validateUpload 에서 공통으로 사용.
+     */
+    @Getter
+    @AllArgsConstructor
+    @Schema(description = "결재/업로드 검증 결과 응답")
+    public static class ValidateRes {
+
+        @Schema(description = "결재/업로드 가능한 성적서 목록")
+        private List<ValidateItem> valid;
+
+        @Schema(description = "결재/업로드 불가 성적서 목록 (이유 포함)")
+        private List<InvalidItem> invalid;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    @Schema(description = "검증 통과 성적서 정보")
+    public static class ValidateItem {
+
+        @Schema(description = "성적서 id", example = "1")
+        private Long id;
+
+        @Schema(description = "성적서번호", example = "BD26-0004-0001")
+        private String reportNum;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    @Schema(description = "검증 실패 성적서 정보")
+    public static class InvalidItem {
+
+        @Schema(description = "성적서 id (파일명 기반 조회 실패 시 null)", nullable = true)
+        private Long id;
+
+        @Schema(description = "성적서번호 또는 파일명", example = "BD26-0004-0001")
+        private String reportNum;
+
+        @Schema(description = "실패 사유", example = "기술책임자결재가 완료된 성적서입니다.")
+        private String reason;
+    }
 }

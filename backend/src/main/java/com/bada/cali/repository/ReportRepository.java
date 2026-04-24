@@ -313,6 +313,9 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 	
 	List<Report> findByMiddleItemCodeIdInAndIsVisible(List<Long> attr0, YnType isVisible);
 
+	/** 성적서번호 목록으로 조회 (업로드 파일명 기반 성적서 매칭 용도) */
+	List<Report> findByReportNumInAndIsVisible(List<String> reportNums, YnType isVisible);
+
 	/**
 	 * 실무자결재 목록 조회 (native query)
 	 * - SELF 타입 자체성적서만, 삭제 제외, 자식성적서 제외, 재발행 성적서 포함

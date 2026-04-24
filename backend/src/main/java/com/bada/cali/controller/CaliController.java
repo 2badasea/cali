@@ -86,6 +86,12 @@ public class CaliController {
 		return "cali/selfReportMultiUpdate";
 	}
 
+	// 성적서업로드 모달 (workApproval 페이지에서 호출)
+	@PostMapping(value = "/reportUpload")
+	public String reportUpload() {
+		return "cali/reportUpload";
+	}
+
 	// 출장일정 페이지 이동
 	@GetMapping(value = "/businessTrip")
 	public String businessTrip(Model model) {

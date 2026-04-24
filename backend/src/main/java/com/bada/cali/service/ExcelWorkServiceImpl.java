@@ -247,13 +247,16 @@ public class ExcelWorkServiceImpl {
                     .orElseThrow(() -> new EntityNotFoundException(
                             "성적서를 찾을 수 없습니다. (id: " + item.getReportId() + ")"));
 
-            // 셀 삽입 데이터 조합 (WorkerDataServiceImpl 재활용)
-            WorkerDataDTO.ReportFillDataRes fillData =
-                    workerDataService.getReportFillData(item.getReportId(), batch.getSampleId());
-
-            Map<String, String> data = buildDataMap(fillData);
+            Map<String, String> data = new LinkedHashMap<>();
+            // WRITE 타입만 셀 삽입 데이터 필요 (WORK_APPROVAL은 빈 맵으로 전달)
+            if (batch.getJobType() == com.bada.cali.common.enums.JobType.WRITE) {
+                WorkerDataDTO.ReportFillDataRes fillData =
+                        workerDataService.getReportFillData(item.getReportId(), batch.getSampleId());
+                data = buildDataMap(fillData);
+            }
 
             // 파일 다운로드 URL: GET /api/excelwork/file/{fileUuid}
+            // → streamFileByUuid 에서 배치 jobType에 따라 샘플 파일 또는 origin.xlsx 분기
             String fileDownloadUrl = base + "/api/excelwork/file/" + item.getFileUuid();
 
             return new ExcelWorkDTO.ItemDetail(
@@ -273,7 +276,14 @@ public class ExcelWorkServiceImpl {
             case MANAGER_APPROVAL -> "manager_approval";
         };
 
-        return new ExcelWorkDTO.JobDetailRes(token, batch.getId(), action, base, sheetSettings, itemDetails);
+        // WORK_APPROVAL 전용: 서명 이미지 다운로드 URL 구성
+        // GET /api/excelwork/sign-image/{token} — token으로 requestMemberId 조회 후 스트리밍
+        String signImgUrl = null;
+        if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL) {
+            signImgUrl = base + "/api/excelwork/sign-image/" + token;
+        }
+
+        return new ExcelWorkDTO.JobDetailRes(token, batch.getId(), action, base, sheetSettings, itemDetails, signImgUrl);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -323,10 +333,15 @@ public class ExcelWorkServiceImpl {
                 .orElseThrow(() -> new EntityNotFoundException(
                         "배치를 찾을 수 없습니다. (batchId: " + item.getBatchId() + ")"));
 
-        log.info("파일 스트리밍 요청 — fileUuid: {}, batchId: {}, reportId: {}",
-                fileUuid, batch.getId(), item.getReportId());
+        log.info("파일 스트리밍 요청 — fileUuid: {}, batchId: {}, reportId: {}, jobType: {}",
+                fileUuid, batch.getId(), item.getReportId(), batch.getJobType());
 
-        // WRITE 타입: 샘플 파일 스트리밍
+        // jobType 분기: WRITE → 샘플 파일, WORK_APPROVAL → origin.xlsx
+        if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL) {
+            String objectKey = storageProps.getRootDir() + "/report/" + item.getReportId() + "/origin.xlsx";
+            return streamFromStorage(objectKey, "origin.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
         return streamSampleFile(batch);
     }
 
@@ -424,10 +439,18 @@ public class ExcelWorkServiceImpl {
             item.setStartDatetime(LocalDateTime.now());
         });
 
-        items.forEach(item -> reportRepository.findById(item.getReportId())
-                .ifPresent(r -> r.setWriteStatus(AppStatus.PROGRESS)));
+        // jobType에 따라 성적서의 다른 상태 필드를 PROGRESS로 전환
+        boolean isWorkApproval = batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL;
+        items.forEach(item -> reportRepository.findById(item.getReportId()).ifPresent(r -> {
+            if (isWorkApproval) {
+                r.setWorkStatus(AppStatus.PROGRESS);
+            } else {
+                r.setWriteStatus(AppStatus.PROGRESS);
+            }
+        }));
 
-        log.info("callbackReady 처리 완료 — batchId: {}, 건수: {}", batch.getId(), items.size());
+        log.info("callbackReady 처리 완료 — batchId: {}, 건수: {}, jobType: {}",
+                batch.getId(), items.size(), batch.getJobType());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -622,6 +645,198 @@ public class ExcelWorkServiceImpl {
                     .createMemberId(memberId)
                     .build());
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 9. callbackApprovalItemDone — 실무자결재 단건 완료 콜백
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 미들웨어가 실무자결재 1건 처리 완료 후 signed.xlsx + signed.pdf 와 함께 호출.
+     *
+     * 처리 순서:
+     *  1. item 조회 + token → batch 검증 + WORK_APPROVAL 타입 확인
+     *  2. 기존 signed_xlsx / signed_pdf file_info 소프트삭제
+     *  3. signed.xlsx → 스토리지 {rootDir}/report/{reportId}/signed.xlsx 업로드
+     *  4. signed.pdf  → 스토리지 {rootDir}/report/{reportId}/signed.pdf  업로드
+     *  5. file_info 2건 신규 등록
+     *  6. item status → SUCCESS + endDatetime
+     *  7. Report.workStatus → SUCCESS + workDatetime
+     *  8. batch.successCount++ + 전체 완료 여부 확인
+     */
+    @Transactional
+    public void callbackApprovalItemDone(String token, Long itemId,
+                                         MultipartFile xlsxFile, MultipartFile pdfFile) {
+        ReportJobBatch batch = findBatchByToken(token);
+
+        if (batch.getJobType() != com.bada.cali.common.enums.JobType.WORK_APPROVAL) {
+            throw new IllegalArgumentException(
+                    "WORK_APPROVAL 배치가 아닙니다. (batchId: " + batch.getId() + ")");
+        }
+
+        ReportJobItem item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new EntityNotFoundException("item을 찾을 수 없습니다. (id: " + itemId + ")"));
+
+        if (!item.getBatchId().equals(batch.getId())) {
+            throw new IllegalArgumentException(
+                    "token의 배치와 item의 배치가 일치하지 않습니다.");
+        }
+
+        Report report = reportRepository.findById(item.getReportId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "성적서를 찾을 수 없습니다. (id: " + item.getReportId() + ")"));
+
+        LocalDateTime now = LocalDateTime.now();
+        String bucket   = storageProps.getBucketName();
+        String rootDir  = storageProps.getRootDir();
+        String CT_XLSX  = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        String CT_PDF   = "application/pdf";
+        String reportDir = "report/" + report.getId() + "/";
+
+        try {
+            // ── 기존 signed 파일 file_info 소프트삭제 ─────────────────────────
+            fileInfoRepository.softDeleteByRefAndNames(
+                    "report", report.getId(),
+                    java.util.List.of("signed_xlsx", "signed_pdf"),
+                    com.bada.cali.common.enums.YnType.n,
+                    now,
+                    batch.getRequestMemberId()
+            );
+
+            // ── signed.xlsx 업로드 ────────────────────────────────────────────
+            String xlsxKey = rootDir + "/report/" + report.getId() + "/signed.xlsx";
+            try (InputStream is = xlsxFile.getInputStream()) {
+                ncloudS3Client.putObject(
+                        PutObjectRequest.builder()
+                                .bucket(bucket).key(xlsxKey)
+                                .acl(ObjectCannedACL.PUBLIC_READ)
+                                .contentType(CT_XLSX)
+                                .build(),
+                        RequestBody.fromInputStream(is, xlsxFile.getSize())
+                );
+            }
+            fileInfoRepository.save(FileInfo.builder()
+                    .refTableName("report").refTableId(report.getId())
+                    .originName("signed.xlsx").name("signed_xlsx").extension("xlsx")
+                    .fileSize(xlsxFile.getSize()).contentType(CT_XLSX)
+                    .dir(reportDir).isVisible(com.bada.cali.common.enums.YnType.y)
+                    .createDatetime(now).createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            // ── signed.pdf 업로드 ─────────────────────────────────────────────
+            String pdfKey = rootDir + "/report/" + report.getId() + "/signed.pdf";
+            try (InputStream is = pdfFile.getInputStream()) {
+                ncloudS3Client.putObject(
+                        PutObjectRequest.builder()
+                                .bucket(bucket).key(pdfKey)
+                                .acl(ObjectCannedACL.PUBLIC_READ)
+                                .contentType(CT_PDF)
+                                .build(),
+                        RequestBody.fromInputStream(is, pdfFile.getSize())
+                );
+            }
+            fileInfoRepository.save(FileInfo.builder()
+                    .refTableName("report").refTableId(report.getId())
+                    .originName("signed.pdf").name("signed_pdf").extension("pdf")
+                    .fileSize(pdfFile.getSize()).contentType(CT_PDF)
+                    .dir(reportDir).isVisible(com.bada.cali.common.enums.YnType.y)
+                    .createDatetime(now).createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            log.info("실무자결재 파일 업로드 완료 — reportId: {}, xlsxKey: {}, pdfKey: {}",
+                    report.getId(), xlsxKey, pdfKey);
+
+            // ── item / report / batch 상태 업데이트 ───────────────────────────
+            item.setStatus(JobItemStatus.SUCCESS);
+            item.setEndDatetime(now);
+            report.setWorkStatus(AppStatus.SUCCESS);
+            report.setWorkDatetime(now);
+            batch.setSuccessCount(batch.getSuccessCount() + 1);
+
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 실무자결재 완료 — reportId: %d, 성적서번호: %s, batchId: %d",
+                            report.getId(), report.getReportNum(), batch.getId()))
+                    .logType("u")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+
+        } catch (Exception e) {
+            log.error("callbackApprovalItemDone 처리 실패 — itemId: {}, reportId: {}: {}",
+                    itemId, report.getId(), e.getMessage(), e);
+            item.setStatus(JobItemStatus.FAIL);
+            item.setMessage(e.getMessage());
+            item.setEndDatetime(now);
+            report.setWorkStatus(AppStatus.FAIL);
+            batch.setFailCount(batch.getFailCount() + 1);
+
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 실무자결재 실패 — reportId: %d, 성적서번호: %s, 오류: %s",
+                            report.getId(), report.getReportNum(), e.getMessage()))
+                    .logType("e")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+        }
+
+        int processed = batch.getSuccessCount() + batch.getFailCount();
+        if (processed >= batch.getTotalCount()) {
+            finalizeBatch(batch);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10. streamSignImage — 실무자 서명 이미지 스트리밍
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * token으로 배치를 조회하여 requestMember의 서명 이미지를 스토리지에서 스트리밍한다.
+     *
+     * 미들웨어가 WORK_APPROVAL 처리 시 sign 이미지를 다운로드할 때 사용.
+     * 인증: X-Callback-Key 헤더 (컨트롤러 레벨).
+     *
+     * @param token 잡 토큰 (배치 조회 + requestMemberId 특정)
+     */
+    @Transactional(readOnly = true)
+    public ResponseEntity<Resource> streamSignImage(String token) {
+        ReportJobBatch batch = findBatchByToken(token);
+        Long memberId = batch.getRequestMemberId();
+
+        // 해당 멤버의 서명 이미지 file_info 조회 (최신 1건)
+        java.util.List<FileInfo> signFiles = fileInfoRepository
+                .findByRefTableNameAndRefTableIdAndIsVisible(
+                        "member", memberId, com.bada.cali.common.enums.YnType.y);
+
+        if (signFiles.isEmpty()) {
+            throw new EntityNotFoundException(
+                    "서명 이미지를 찾을 수 없습니다. (memberId: " + memberId + ")");
+        }
+        // 최신 파일 우선 (createDatetime 내림차순이 없으므로 마지막 항목 사용)
+        FileInfo fileInfo = signFiles.get(signFiles.size() - 1);
+
+        // objectKey 구성: {rootDir}/{dir}/{fileInfo.id}.{extension}
+        String rootDir = storageProps.getRootDir();
+        String dir = fileInfo.getDir();
+        String objectKey = rootDir + "/" +
+                (dir.endsWith("/") ? dir : dir + "/") + fileInfo.getId();
+        if (fileInfo.getExtension() != null && !fileInfo.getExtension().isBlank()) {
+            objectKey += "." + fileInfo.getExtension();
+        }
+
+        log.info("서명 이미지 스트리밍 — memberId: {}, fileInfoId: {}, key: {}",
+                memberId, fileInfo.getId(), objectKey);
+
+        return streamFromStorage(objectKey,
+                fileInfo.getOriginName() != null ? fileInfo.getOriginName() : "sign.png",
+                fileInfo.getContentType());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

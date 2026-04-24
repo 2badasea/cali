@@ -4,6 +4,7 @@ import com.bada.cali.common.ResMessage;
 import com.bada.cali.dto.ReportJobBatchDTO;
 import com.bada.cali.security.CustomUserDetails;
 import com.bada.cali.service.ReportJobBatchServiceImpl;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -135,6 +136,32 @@ public class ReportJobBatchController {
             @ApiResponse(responseCode = "500", description = "서버 오류",
                     content = @Content(schema = @Schema(implementation = ResMessage.class)))
     })
+    /**
+     * 실무자결재 사전 검증 (사이드이펙트 없음)
+     *
+     * 배치 생성 전 대상 성적서들의 결재 가능 여부를 순수하게 조회한다.
+     * 프론트엔드는 이 결과를 받아 불가 건을 사용자에게 안내 후 유효 건만 배치 생성한다.
+     */
+    @Operation(
+            summary = "실무자결재 사전 검증",
+            description = "배치 생성 전 대상 성적서들의 결재 가능 여부를 조회. 사이드이펙트 없음. " +
+                    "valid(결재 가능), invalid(불가 및 사유) 목록을 반환"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "검증 완료 (valid/invalid 목록 반환)"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/validateWorkApproval")
+    public ResponseEntity<ResMessage<ReportJobBatchDTO.ValidateRes>> validateWorkApproval(
+            @Valid @RequestBody ReportJobBatchDTO.ValidateWorkApprovalReq req
+    ) {
+        ReportJobBatchDTO.ValidateRes res = batchService.validateWorkApproval(req.getReportIds());
+        return ResponseEntity.ok(new ResMessage<>(1, "검증 완료", res));
+    }
+
     @GetMapping("/batches/{batchId}")
     public ResponseEntity<ResMessage<ReportJobBatchDTO.BatchStatusRes>> getBatchStatus(
             @Parameter(description = "배치 id", example = "123") @PathVariable Long batchId

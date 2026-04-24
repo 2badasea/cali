@@ -33,7 +33,9 @@
       "Bash(mv \"C:/BadaDev/my-obsidian/개발공부/프로젝트\" \"C:/BadaDev/my-obsidian/개발공부/project\")",
       "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(1to20\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(1to20\\).md\")",
       "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(21to40\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(21to40\\).md\")",
-      "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(41to60\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(41to60\\).md\")"
+      "Bash(cp \"C:/BadaDev/learningDocs/side_project/metrology/notation\\(41to60\\).md\" \"C:/BadaDev/my-obsidian/개발공부/project/cali/notation\\(41to60\\).md\")",
+      "Read(//c/BadaDev/ExcelWorkApp/**)",
+      "Read(//c/BadaDev/**)"
     ],
     "additionalDirectories": [
       "C:\\BadaDev\\my-obsidian\\개발공부\\architecture",

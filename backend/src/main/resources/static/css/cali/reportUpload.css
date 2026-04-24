@@ -1,0 +1,86 @@
+/* 드래그앤드롭 업로드 영역 */
+.upload-drop-zone {
+    border: 2px dashed #adb5bd;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+
+.upload-drop-zone.drag-over {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+}
+
+.upload-drop-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.upload-icon {
+    font-size: 2.5rem;
+    color: #6c757d;
+    margin-bottom: 4px;
+}
+
+.upload-hint {
+    font-size: 0.9rem;
+    color: #495057;
+    margin: 0;
+}
+
+.upload-hint-sub {
+    font-size: 0.78rem;
+    color: #6c757d;
+    margin: 0;
+}
+
+/* 선택된 파일 목록 */
+.file-list-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #495057;
+    margin: 12px 0 6px;
+}
+
+.file-name-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 140px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.file-name-list li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    font-size: 0.82rem;
+    color: #212529;
+    border-bottom: 1px solid #f1f3f5;
+}
+
+.file-name-list li:last-child {
+    border-bottom: none;
+}
+
+.file-name-list li .bi-file-earmark-excel {
+    color: #1d6f42;
+    flex-shrink: 0;
+}
+
+/* 액션 버튼 영역 */
+.upload-action-area {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 12px;
+}

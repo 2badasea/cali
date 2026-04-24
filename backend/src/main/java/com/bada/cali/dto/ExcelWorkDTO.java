@@ -79,7 +79,8 @@ public class ExcelWorkDTO {
             @Schema(description = "작업 유형 (report_write 등)") String action,
             @Schema(description = "CALI 서버 URL (콜백 전송 대상)") String serverUrl,
             @Schema(description = "엑셀 셀 주소·형식 설정 맵 (fieldCode → {cell, format})") Map<String, SheetFieldSetting> sheetSettings,
-            @Schema(description = "처리 대상 성적서 목록") List<ItemDetail> items
+            @Schema(description = "처리 대상 성적서 목록") List<ItemDetail> items,
+            @Schema(description = "실무자 서명 이미지 다운로드 URL (WORK_APPROVAL 전용, 그 외 null)", nullable = true) String signImgUrl
     ) {}
 
     /**

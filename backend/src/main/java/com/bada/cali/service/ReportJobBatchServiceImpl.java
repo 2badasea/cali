@@ -591,6 +591,93 @@ public class ReportJobBatchServiceImpl {
         return new ReportJobBatchDTO.CreateBatchRes(batchId, validatedIds.size(), signObjectKey);
     }
 
+    // ── 실무자결재 사전 검증 ───────────────────────────────────────────────────
+
+    /**
+     * 실무자결재 사전 검증 (사이드이펙트 없음 — 순수 조회).
+     *
+     * 다중결재 버튼 클릭 시 배치 생성 전에 호출하여,
+     * 통과/실패 결과를 프론트에서 사용자에게 먼저 보여주기 위해 사용한다.
+     *
+     * 검증 항목:
+     *  - 성적서 존재 여부 (is_visible = 'y')
+     *  - SELF 타입 여부
+     *  - write_status = SUCCESS (원본 파일 존재 여부 — 다중결재는 원본이 이미 있어야 함)
+     *  - work_status 가 READY/PROGRESS 이면 이미 진행 중
+     *  - approval_status 가 READY/PROGRESS/SUCCESS 이면 기술책임자결재 진행/완료 상태
+     *  - workMemberId 설정 여부
+     *  - workMember 서명 이미지 존재 여부
+     *
+     * @param reportIds 검증할 성적서 id 목록
+     * @return valid/invalid 분류 결과
+     */
+    @Transactional(readOnly = true)
+    public ReportJobBatchDTO.ValidateRes validateWorkApproval(List<Long> reportIds) {
+        List<Report> reports = reportRepository.findAllById(reportIds);
+
+        // 요청 id → Report 매핑 (존재하지 않는 id 감지용)
+        java.util.Map<Long, Report> reportMap = reports.stream()
+                .collect(java.util.stream.Collectors.toMap(Report::getId, r -> r));
+
+        // workMember 서명 이미지 일괄 조회 (N+1 방지)
+        java.util.Set<Long> workMemberIds = reports.stream()
+                .filter(r -> r.getWorkMemberId() != null)
+                .map(Report::getWorkMemberId)
+                .collect(java.util.stream.Collectors.toSet());
+        java.util.Set<Long> memberIdsWithSign = fileInfoRepository
+                .findByRefTableNameAndRefTableIdInAndIsVisible("member", workMemberIds,
+                        com.bada.cali.common.enums.YnType.y)
+                .stream()
+                .map(com.bada.cali.entity.FileInfo::getRefTableId)
+                .collect(java.util.stream.Collectors.toSet());
+
+        List<ReportJobBatchDTO.ValidateItem>  valid   = new java.util.ArrayList<>();
+        List<ReportJobBatchDTO.InvalidItem>   invalid = new java.util.ArrayList<>();
+
+        for (Long id : reportIds) {
+            Report report = reportMap.get(id);
+
+            if (report == null || report.getIsVisible() != com.bada.cali.common.enums.YnType.y) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, null, "존재하지 않는 성적서입니다."));
+                continue;
+            }
+
+            final String num = report.getReportNum();
+
+            if (report.getReportType() != com.bada.cali.common.enums.ReportType.SELF) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "자체성적서(SELF)만 결재 가능합니다."));
+                continue;
+            }
+            if (report.getWriteStatus() != com.bada.cali.common.enums.AppStatus.SUCCESS) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "성적서작성이 완료되지 않은 성적서입니다."));
+                continue;
+            }
+            if (report.getWorkStatus() == com.bada.cali.common.enums.AppStatus.READY
+                    || report.getWorkStatus() == com.bada.cali.common.enums.AppStatus.PROGRESS) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "이미 실무자결재가 진행 중인 성적서입니다."));
+                continue;
+            }
+            if (report.getApprovalStatus() == com.bada.cali.common.enums.AppStatus.READY
+                    || report.getApprovalStatus() == com.bada.cali.common.enums.AppStatus.PROGRESS
+                    || report.getApprovalStatus() == com.bada.cali.common.enums.AppStatus.SUCCESS) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "기술책임자결재가 진행 중이거나 완료된 성적서입니다."));
+                continue;
+            }
+            if (report.getWorkMemberId() == null) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "실무자가 지정되지 않은 성적서입니다."));
+                continue;
+            }
+            if (!memberIdsWithSign.contains(report.getWorkMemberId())) {
+                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "실무자 서명 이미지가 등록되어 있지 않습니다."));
+                continue;
+            }
+
+            valid.add(new ReportJobBatchDTO.ValidateItem(id, num));
+        }
+
+        return new ReportJobBatchDTO.ValidateRes(valid, invalid);
+    }
+
     // ── 작업서버 트리거 ────────────────────────────────────────────────────────
 
     /**

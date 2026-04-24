@@ -268,6 +268,79 @@ public class ExcelWorkController {
     }
 
     /**
+     * 실무자결재 item-done 콜백 — signed.xlsx + signed.pdf 두 파일을 함께 수신.
+     *
+     * 두 파일을 스토리지에 업로드하고 file_info를 교체한 뒤
+     * item/Report 상태를 SUCCESS 로 갱신.
+     * 인증: X-Callback-Key 헤더.
+     */
+    @Operation(
+            summary = "실무자결재 item 완료 콜백 (미들웨어→서버, multipart)",
+            description = "미들웨어가 실무자결재 1건 완료 후 signed.xlsx + signed.pdf 와 함께 호출. " +
+                    "두 파일을 스토리지에 업로드하고 file_info를 교체한 뒤 workStatus=SUCCESS 로 갱신. " +
+                    "세션 인증 불필요, X-Callback-Key 인증"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "파일 업로드 및 상태 갱신 성공"),
+            @ApiResponse(responseCode = "400", description = "파일 누락 또는 파라미터 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "유효하지 않은 token 또는 itemId",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/callback/approval-item-done")
+    public ResponseEntity<ResMessage<Void>> callbackApprovalItemDone(
+            @RequestParam String token,
+            @RequestParam Long itemId,
+            @RequestPart MultipartFile xlsxFile,
+            @RequestPart MultipartFile pdfFile,
+            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+    ) {
+        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(new ResMessage<>(-1, "유효하지 않은 콜백 키입니다.", null));
+        }
+        excelWorkService.callbackApprovalItemDone(token, itemId, xlsxFile, pdfFile);
+        return ResponseEntity.ok(new ResMessage<>(1, "실무자결재 item 완료 처리 성공", null));
+    }
+
+    /**
+     * 서명 이미지 스트리밍 — 미들웨어 WORK_APPROVAL 처리 시 서명 이미지 다운로드.
+     *
+     * token으로 배치를 조회하여 requestMember의 서명 이미지를 스토리지에서 스트리밍한다.
+     * SecurityConfig: /api/excelwork/sign-image/** permitAll.
+     * 인증: X-Callback-Key 헤더.
+     */
+    @Operation(
+            summary = "서명 이미지 스트리밍 (미들웨어용)",
+            description = "token으로 배치를 조회하여 실무자 서명 이미지를 스토리지에서 스트리밍. " +
+                    "미들웨어가 WORK_APPROVAL 처리 시 서명 이미지를 다운로드할 때 사용. " +
+                    "세션 인증 불필요, X-Callback-Key 인증"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "이미지 스트리밍 성공"),
+            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "token 또는 서명 이미지 없음",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @GetMapping("/sign-image/{token}")
+    public ResponseEntity<Resource> streamSignImage(
+            @Parameter(description = "잡 토큰") @PathVariable String token,
+            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+    ) {
+        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return excelWorkService.streamSignImage(token);
+    }
+
+    /**
      * done 콜백 — 미들웨어가 전체 작업 완료 후 호출.
      *
      * 배치 최종 상태(SUCCESS/FAIL) 를 확정하고 endDatetime 을 기록.

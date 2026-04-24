@@ -74,6 +74,8 @@ public class CustomSecurityConfig {
 								, "/api/excelwork/job/**"
 								, "/api/excelwork/file/**"
 								, "/api/excelwork/callback/**"
+								// 서명 이미지 중계: token 으로 식별, X-Callback-Key 로 컨트롤러 레벨 검증
+								, "/api/excelwork/sign-image/**"
 						).permitAll()
 						.anyRequest().authenticated()                // 그외 요청에 대해선 인증된 사용자만 허용
 				)
