@@ -31,6 +31,7 @@ $(function () {
 	// 성적서 파일 다운로드 (원본/EXCEL/PDF)
 	// fetch + blob 방식: 다운로드 응답을 받은 뒤 a 태그 클릭으로 저장 유도
 	// gLoadingMessage 로 연속클릭 방지 → 다운로드 준비 완료 후 닫기
+	// gridClass.js의 ReportFileDownloadRenderer에서 window.downloadReportFile 로 참조됨
 	// =====================================================================
 	async function downloadReportFile(reportId, fileType, reportNum) {
 		gLoadingMessage('다운로드 중...');
@@ -67,149 +68,6 @@ $(function () {
 			console.error('[workApproval] 파일 다운로드 오류:', e);
 			gToast('파일 다운로드 중 오류가 발생했습니다.', 'error');
 		}
-	}
-
-	// =====================================================================
-	// 성적서 파일 다운로드 아이콘 셀 렌더러
-	// originFileId / excelFileId / pdfFileId 컬럼에 공통 사용
-	// value(fileId)가 있을 때만 아이콘 버튼 표시, 없으면 빈 셀
-	// =====================================================================
-	class ReportFileDownloadRenderer {
-		constructor(props) {
-			// UploadCellRenderer 와 동일하게 flex + 100% 사이즈 적용
-			// → rowHeight:'auto' 환경에서 다른 셀이 개행돼도 상하 여백 없이 수직 중앙 정렬
-			this.el = document.createElement('div');
-			this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
-			this.render(props);
-		}
-
-		render(props) {
-			// props.value: file_info.id (null이면 파일 없음 → 아이콘 미표시)
-			// Toast UI Grid 렌더러에는 props.row 가 없음 → props.grid.getRow(props.rowKey) 사용
-			const hasFile = !!props.value;
-			const colName = props.columnInfo.name; // 'originFileId' | 'excelFileId' | 'pdfFileId'
-
-			if (!hasFile) {
-				this.el.innerHTML = '';
-				return;
-			}
-
-			// 컬럼명 → fileType (서버 API 경로: /api/file/report/{reportId}/{fileType})
-			const fileTypeMap = {
-				originFileId: 'origin',
-				excelFileId:  'signed_xlsx',
-				pdfFileId:    'signed_pdf',
-			};
-			const fileType = fileTypeMap[colName] ?? 'origin';
-			// props.grid.getRow()로 행 데이터 조회 후 report.id 추출
-			const reportId = props.grid.getRow(props.rowKey).id;
-
-			// PDF 컬럼은 빨간 배경, 그 외(원본·EXCEL)는 녹색
-			const isPdf  = colName === 'pdfFileId';
-			const btnCls = isPdf ? 'btn-danger' : 'btn-success';
-			const icon   = isPdf ? 'bi-file-earmark-pdf-fill' : 'bi-file-earmark-excel-fill';
-
-			// 버튼을 셀 가로 전체로 채워 업로드 열과 동일한 시각적 비중 유지
-			this.el.innerHTML =
-				`<button class="btn btn-sm ${btnCls} w-100" style="height:100%; min-height:28px;" title="다운로드">` +
-				`<i class="bi ${icon}"></i></button>`;
-
-			// 버튼 클릭 → 다운로드 (그리드 row 클릭 이벤트로 전파 차단)
-			const reportNum = props.grid.getRow(props.rowKey).reportNum ?? '';
-			this.el.querySelector('button').addEventListener('click', (e) => {
-				e.stopPropagation();
-				downloadReportFile(reportId, fileType, reportNum);
-			});
-		}
-
-		getElement() { return this.el; }
-	}
-
-	// =====================================================================
-	// WriteStatusCellRenderer: 성적서작성(ExcelWork) 상태 배지 표시
-	// write_status: IDLE(미작성), READY(대기), PROGRESS(진행중), SUCCESS(완료), FAIL(실패)
-	// =====================================================================
-	class WriteStatusCellRenderer {
-		constructor(props) {
-			this.el = document.createElement('div');
-			this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
-			this.render(props);
-		}
-
-		render(props) {
-			const v = props.value;
-			if (!v || v === 'IDLE') {
-				this.el.innerHTML = '';
-				return;
-			}
-			const map = {
-				READY:    '<span class="badge bg-warning text-dark">대기</span>',
-				PROGRESS: '<span class="badge bg-primary"><span class="spinner-border spinner-border-sm me-1" role="status" style="width:.6rem;height:.6rem;"></span>진행중</span>',
-				SUCCESS:  '<span class="badge bg-success">완료</span>',
-				FAIL:     '<span class="badge bg-danger">실패</span>',
-			};
-			this.el.innerHTML = map[v] ?? `<span class="badge bg-secondary">${v}</span>`;
-		}
-
-		getElement() { return this.el; }
-	}
-
-	// =====================================================================
-	// WorkApprovalCellRenderer: 업로드(input[type=file]) + 조건부 결재 버튼
-	// - input[type=file] : 항상 표시 — 파일 선택 시 handleSingleFileUpload() 호출
-	// - 결재 버튼        : originFileId 있을 때만 표시 → doWorkApproval() 호출
-	// =====================================================================
-	class WorkApprovalCellRenderer {
-		constructor(props) {
-			this.el = document.createElement('div');
-			this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:2px; width:100%; height:100%; min-height:28px;';
-			this.render(props);
-		}
-
-		render(props) {
-			const row       = props.grid.getRow(props.rowKey);
-			const hasOrigin = !!(row && row.originFileId);
-			const reportId  = row?.id;
-			const reportNum = row?.reportNum ?? '';
-
-			// 업로드 버튼 (숨겨진 input + label)
-			const label = document.createElement('label');
-			label.className = 'btn btn-sm btn-outline-secondary mb-0';
-			label.style.cssText = 'cursor:pointer; padding:2px 5px; font-size:0.75rem; line-height:1.4;';
-			label.title = '파일 업로드';
-			label.innerHTML = '<i class="bi bi-upload"></i>';
-
-			const input = document.createElement('input');
-			input.type   = 'file';
-			input.accept = '.xlsx,.xls';
-			input.style.display = 'none';
-			label.appendChild(input);
-
-			input.addEventListener('change', (e) => {
-				e.stopPropagation();
-				const file = e.target.files[0];
-				if (!file) return;
-				handleSingleFileUpload(reportId, reportNum, file, input);
-			});
-
-			this.el.appendChild(label);
-
-			// 결재 버튼 (원본 파일 있을 때만)
-			if (hasOrigin) {
-				const btn = document.createElement('button');
-				btn.className = 'btn btn-sm btn-warning';
-				btn.style.cssText = 'padding:2px 5px; font-size:0.75rem; line-height:1.4;';
-				btn.title = '실무자결재';
-				btn.innerHTML = '<i class="bi bi-pen-fill"></i>';
-				btn.addEventListener('click', (e) => {
-					e.stopPropagation();
-					doWorkApproval([reportId], reportNum);
-				});
-				this.el.appendChild(btn);
-			}
-		}
-
-		getElement() { return this.el; }
 	}
 
 	// =====================================================================
@@ -397,6 +255,14 @@ $(function () {
 	}
 
 	// =====================================================================
+	// gridClass.js의 renderer class(ReportFileDownloadRenderer, WorkApprovalCellRenderer)에서
+	// 참조할 수 있도록 window에 노출 — 클로저 내부 함수이므로 명시적 노출 필요
+	// =====================================================================
+	window.downloadReportFile     = downloadReportFile;
+	window.handleSingleFileUpload = handleSingleFileUpload;
+	window.doWorkApproval         = doWorkApproval;
+
+	// =====================================================================
 	// init_modal: 중/소분류 코드 비동기 초기화 (initPage 또는 modal_ready에서 호출됨)
 	// =====================================================================
 	$modal.init_modal = async (param) => {
@@ -525,7 +391,6 @@ $(function () {
 			{
 				header: '기기명',
 				name: 'itemName',
-				width: 200,
 				align: 'center',
 				className: 'cursor_pointer',
 				whiteSpace: 'pre-line',

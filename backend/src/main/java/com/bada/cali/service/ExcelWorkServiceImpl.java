@@ -644,6 +644,25 @@ public class ExcelWorkServiceImpl {
             }
             log.info("성적서 파일 업로드 완료 — reportId: {}, key: {}", report.getId(), objectKey);
 
+            // ── file_info(origin) 등록 ────────────────────────────────────────
+            // 재작성 시 중복 방지: 기존 origin file_info 소프트삭제 후 재등록
+            String reportDir = "report/" + report.getId() + "/";
+            fileInfoRepository.softDeleteByRefAndNames(
+                    "report", report.getId(),
+                    java.util.List.of("origin"),
+                    YnType.n,
+                    now,
+                    batch.getRequestMemberId()
+            );
+            fileInfoRepository.save(FileInfo.builder()
+                    .refTableName("report").refTableId(report.getId())
+                    .originName("origin.xlsx").name("origin").extension("xlsx")
+                    .fileSize(file.getSize()).contentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    .dir(reportDir).isVisible(YnType.y)
+                    .createDatetime(now).createMemberId(batch.getRequestMemberId())
+                    .build());
+            log.debug("성적서 원본 file_info 등록 완료 — reportId: {}", report.getId());
+
             // ── item SUCCESS 처리 ─────────────────────────────────────────────
             item.setStatus(JobItemStatus.SUCCESS);
             item.setEndDatetime(now);

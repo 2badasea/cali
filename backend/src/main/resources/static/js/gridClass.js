@@ -486,3 +486,137 @@ class IsReadRenderer {
 	mounted() {}
 	beforeDestroy() {}
 }
+
+// 실무자결재: 성적서 파일 다운로드 렌더러 (원본/EXCEL/PDF)
+// - originFileId → fileType 'origin', excelFileId → 'signed_xlsx', pdfFileId → 'signed_pdf'
+// - value(fileId)가 있을 때만 아이콘 버튼 표시, 없으면 빈 셀
+// - 클릭 시 window.downloadReportFile(reportId, fileType, reportNum) 호출 (workApproval.js에서 노출)
+class ReportFileDownloadRenderer {
+	constructor(props) {
+		this.el = document.createElement('div');
+		this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
+		this.render(props);
+	}
+
+	render(props) {
+		const hasFile = !!props.value;
+		const colName = props.columnInfo.name; // 'originFileId' | 'excelFileId' | 'pdfFileId'
+
+		if (!hasFile) {
+			this.el.innerHTML = '';
+			return;
+		}
+
+		const fileTypeMap = {
+			originFileId: 'origin',
+			excelFileId:  'signed_xlsx',
+			pdfFileId:    'signed_pdf',
+		};
+		const fileType  = fileTypeMap[colName] ?? 'origin';
+		const reportId  = props.grid.getRow(props.rowKey).id;
+		const reportNum = props.grid.getRow(props.rowKey).reportNum ?? '';
+
+		const isPdf  = colName === 'pdfFileId';
+		const btnCls = isPdf ? 'btn-danger' : 'btn-success';
+		const icon   = isPdf ? 'bi-file-earmark-pdf-fill' : 'bi-file-earmark-excel-fill';
+
+		this.el.innerHTML =
+			`<button class="btn btn-sm ${btnCls} w-100" style="height:100%; min-height:28px;" title="다운로드">` +
+			`<i class="bi ${icon}"></i></button>`;
+
+		this.el.querySelector('button').addEventListener('click', (e) => {
+			e.stopPropagation();
+			if (typeof downloadReportFile === 'function') {
+				downloadReportFile(reportId, fileType, reportNum);
+			}
+		});
+	}
+
+	getElement() { return this.el; }
+}
+
+// 실무자결재: 성적서작성(ExcelWork) 상태 배지 렌더러
+// - IDLE: 빈 셀 / READY: 대기(노란) / PROGRESS: 진행중(파란+스피너) / SUCCESS: 완료(초록) / FAIL: 실패(빨간)
+class WriteStatusCellRenderer {
+	constructor(props) {
+		this.el = document.createElement('div');
+		this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
+		this.render(props);
+	}
+
+	render(props) {
+		const v = props.value;
+		if (!v || v === 'IDLE') {
+			this.el.innerHTML = '';
+			return;
+		}
+		const map = {
+			READY:    '<span class="badge bg-warning text-dark">대기</span>',
+			PROGRESS: '<span class="badge bg-primary"><span class="spinner-border spinner-border-sm me-1" role="status" style="width:.6rem;height:.6rem;"></span>진행중</span>',
+			SUCCESS:  '<span class="badge bg-success">완료</span>',
+			FAIL:     '<span class="badge bg-danger">실패</span>',
+		};
+		this.el.innerHTML = map[v] ?? `<span class="badge bg-secondary">${v}</span>`;
+	}
+
+	getElement() { return this.el; }
+}
+
+// 실무자결재: 업로드(input[type=file]) + 조건부 결재 버튼 렌더러
+// - input[type=file] : 항상 표시 → 파일 선택 시 window.handleSingleFileUpload() 호출
+// - 결재 버튼        : originFileId 있을 때만 표시 → window.doWorkApproval() 호출
+// (참조 함수는 workApproval.js에서 window에 노출됨)
+class WorkApprovalCellRenderer {
+	constructor(props) {
+		this.el = document.createElement('div');
+		this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:2px; width:100%; height:100%; min-height:28px;';
+		this.render(props);
+	}
+
+	render(props) {
+		const row       = props.grid.getRow(props.rowKey);
+		const hasOrigin = !!(row && row.originFileId);
+		const reportId  = row?.id;
+		const reportNum = row?.reportNum ?? '';
+
+		const label = document.createElement('label');
+		label.className = 'btn btn-sm btn-outline-secondary mb-0';
+		label.style.cssText = 'cursor:pointer; padding:2px 5px; font-size:0.75rem; line-height:1.4;';
+		label.title = '파일 업로드';
+		label.innerHTML = '<i class="bi bi-upload"></i>';
+
+		const input = document.createElement('input');
+		input.type   = 'file';
+		input.accept = '.xlsx,.xls';
+		input.style.display = 'none';
+		label.appendChild(input);
+
+		input.addEventListener('change', (e) => {
+			e.stopPropagation();
+			const file = e.target.files[0];
+			if (!file) return;
+			if (typeof handleSingleFileUpload === 'function') {
+				handleSingleFileUpload(reportId, reportNum, file, input);
+			}
+		});
+
+		this.el.appendChild(label);
+
+		if (hasOrigin) {
+			const btn = document.createElement('button');
+			btn.className = 'btn btn-sm btn-warning';
+			btn.style.cssText = 'padding:2px 5px; font-size:0.75rem; line-height:1.4;';
+			btn.title = '실무자결재';
+			btn.innerHTML = '<i class="bi bi-pen-fill"></i>';
+			btn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				if (typeof doWorkApproval === 'function') {
+					doWorkApproval([reportId], reportNum);
+				}
+			});
+			this.el.appendChild(btn);
+		}
+	}
+
+	getElement() { return this.el; }
+}

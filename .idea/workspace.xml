@@ -13,7 +13,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="809" />
+    <option name="cachedIndexableFilesCount" value="994" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="ExternalProjectsData">
@@ -140,6 +140,7 @@
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
     &quot;Spring Boot.CaliApplication.executor&quot;: &quot;Run&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;develop&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
@@ -192,6 +193,9 @@
       <workItem from="1772534361306" duration="2015000" />
       <workItem from="1773482686916" duration="191000" />
       <workItem from="1773713781780" duration="6883000" />
+      <workItem from="1775871728463" duration="113000" />
+      <workItem from="1775871903912" duration="59000" />
+      <workItem from="1777095147401" duration="666000" />
     </task>
     <task id="LOCAL-00001" summary="gitignore 수정">
       <option name="closed" value="true" />
