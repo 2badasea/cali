@@ -208,6 +208,132 @@ public class ExcelWorkServiceImpl {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 1-2. createWorkApprovalJob — 실무자결재 배치 생성 + excelwork:// URI 발급
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 실무자결재 작업 요청 처리.
+     *
+     * 처리 순서:
+     *  1. 성적서 유효성 검증 (writeStatus=SUCCESS, workStatus 중복 아님, 실무자 지정 확인)
+     *  2. 요청자가 해당 성적서들의 workMember인지 확인 (서명 이미지 주체 일치)
+     *  3. ReportJobBatch 생성 (status=READY, token=UUID, jobType=WORK_APPROVAL)
+     *  4. ReportJobItem 목록 생성 — 각 item에 fileUuid 부여
+     *  5. 대상 성적서 workStatus → READY
+     *  6. 로그 기록
+     *  7. excelwork:// URI + 응답 반환
+     *
+     * @param req      성적서 id 목록 + 선택 serverUrl
+     * @param memberId 요청 사용자 id (실무자 본인이어야 함 — 서명 이미지 주체)
+     */
+    @Transactional
+    public ExcelWorkDTO.CreateJobRes createWorkApprovalJob(ExcelWorkDTO.CreateWorkApprovalJobReq req, Long memberId) {
+
+        List<Long> reportIds = req.getReportIds();
+
+        // ── 1. 성적서 조회 및 유효성 검증 ────────────────────────────────────
+        List<Report> reports = reportRepository.findAllById(reportIds);
+        if (reports.size() != reportIds.size()) {
+            throw new EntityNotFoundException("존재하지 않는 성적서가 포함되어 있습니다.");
+        }
+
+        java.util.Set<Long> workMemberIds = new java.util.HashSet<>();
+        for (Report report : reports) {
+            if (report.getIsVisible() != YnType.y) {
+                throw new IllegalArgumentException(
+                        String.format("삭제된 성적서가 포함되어 있습니다. (id: %d)", report.getId()));
+            }
+            if (report.getReportType() != ReportType.SELF) {
+                throw new IllegalArgumentException(
+                        String.format("자체성적서(SELF)만 처리 가능합니다. (id: %d)", report.getId()));
+            }
+            if (report.getWriteStatus() != AppStatus.SUCCESS) {
+                throw new IllegalArgumentException(
+                        String.format("성적서작성이 완료되지 않은 성적서입니다. (id: %d)", report.getId()));
+            }
+            if (report.getWorkStatus() == AppStatus.READY || report.getWorkStatus() == AppStatus.PROGRESS) {
+                throw new IllegalArgumentException(
+                        String.format("이미 실무자결재가 진행 중인 성적서입니다. (id: %d)", report.getId()));
+            }
+            if (report.getApprovalStatus() == AppStatus.READY || report.getApprovalStatus() == AppStatus.PROGRESS
+                    || report.getApprovalStatus() == AppStatus.SUCCESS) {
+                throw new IllegalArgumentException(
+                        String.format("기술책임자결재가 진행 중이거나 완료된 성적서입니다. (id: %d)", report.getId()));
+            }
+            if (report.getWorkMemberId() == null) {
+                throw new IllegalArgumentException(
+                        String.format("실무자가 지정되지 않은 성적서입니다. (id: %d)", report.getId()));
+            }
+            workMemberIds.add(report.getWorkMemberId());
+        }
+
+        // ── 2. 모든 실무자의 서명 이미지 존재 확인 ──────────────────────────────────
+        // 서명 이미지는 각 성적서의 workMemberId 기준으로 item별로 삽입되므로
+        // 배치 내 등장하는 모든 실무자의 서명 이미지가 등록되어 있어야 한다.
+        List<FileInfo> signFileList = fileInfoRepository
+                .findByRefTableNameAndRefTableIdInAndIsVisible("member", workMemberIds, YnType.y);
+        java.util.Set<Long> memberIdsWithSign = signFileList.stream()
+                .map(FileInfo::getRefTableId)
+                .collect(java.util.stream.Collectors.toSet());
+        for (Report report : reports) {
+            if (!memberIdsWithSign.contains(report.getWorkMemberId())) {
+                throw new IllegalArgumentException(
+                        String.format("실무자 서명 이미지가 등록되어 있지 않습니다. 해당 실무자의 서명 이미지를 먼저 등록해 주세요. (workMemberId=%d)",
+                                report.getWorkMemberId()));
+            }
+        }
+
+        // ── 3. ReportJobBatch 생성 ────────────────────────────────────────────
+        String token = UUID.randomUUID().toString().replace("-", "");
+        ReportJobBatch batch = batchRepository.save(ReportJobBatch.builder()
+                .jobType(JobType.WORK_APPROVAL)
+                .requestMemberId(memberId)
+                .sampleId(null)   // WORK_APPROVAL은 샘플 파일 불필요
+                .totalCount(reportIds.size())
+                .status(BatchStatus.READY)
+                .token(token)
+                .createDatetime(LocalDateTime.now())
+                .build());
+
+        // ── 4. ReportJobItem 생성 — item별 fileUuid 부여 ──────────────────────
+        List<ReportJobItem> items = reportIds.stream()
+                .map(reportId -> ReportJobItem.builder()
+                        .batchId(batch.getId())
+                        .reportId(reportId)
+                        .fileUuid(UUID.randomUUID().toString())
+                        .build())
+                .collect(Collectors.toList());
+        itemRepository.saveAll(items);
+
+        // ── 5. 성적서 workStatus → READY ─────────────────────────────────────
+        reports.forEach(r -> r.setWorkStatus(AppStatus.READY));
+
+        // ── 6. 로그 기록 ──────────────────────────────────────────────────────
+        logRepository.save(Log.builder()
+                .workerName("system")
+                .logContent(String.format(
+                        "ExcelWork 실무자결재 배치 생성 (batchId: %d, token: %s) — 고유번호 - %s",
+                        batch.getId(), token, reportIds))
+                .logType("i")
+                .refTable("report_job_batch")
+                .refTableId(batch.getId())
+                .createDatetime(LocalDateTime.now())
+                .createMemberId(memberId)
+                .build());
+
+        log.info("ExcelWork 실무자결재 배치 생성 완료 — batchId: {}, token: {}, 건수: {}",
+                batch.getId(), token, reportIds.size());
+
+        // ── 7. excelwork:// URI 생성 ─────────────────────────────────────────
+        String serverUrl = resolveServerUrl(req.getServerUrl());
+        String excelworkUri = "excelwork://process?token=" + token
+                + "&serverUrl=" + URLEncoder.encode(serverUrl, StandardCharsets.UTF_8)
+                + "&callbackKey=" + URLEncoder.encode(excelworkCallbackKey, StandardCharsets.UTF_8);
+
+        return new ExcelWorkDTO.CreateJobRes(batch.getId(), token, excelworkUri, reportIds.size());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 2. getJobByToken — 미들웨어용 잡 상세 조회 (완전한 JSON)
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -259,13 +385,22 @@ public class ExcelWorkServiceImpl {
             // → streamFileByUuid 에서 배치 jobType에 따라 샘플 파일 또는 origin.xlsx 분기
             String fileDownloadUrl = base + "/api/excelwork/file/" + item.getFileUuid();
 
+            // WORK_APPROVAL: item별 서명 이미지 URL — 해당 성적서의 workMemberId 기준
+            // GET /api/excelwork/sign-image/member/{workMemberId}
+            String itemSignImgUrl = null;
+            if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL
+                    && report.getWorkMemberId() != null) {
+                itemSignImgUrl = base + "/api/excelwork/sign-image/member/" + report.getWorkMemberId();
+            }
+
             return new ExcelWorkDTO.ItemDetail(
                     item.getId(),
                     report.getId(),
                     report.getReportNum(),
                     item.getFileUuid(),
                     fileDownloadUrl,
-                    data
+                    data,
+                    itemSignImgUrl
             );
         }).toList();
 
@@ -276,8 +411,8 @@ public class ExcelWorkServiceImpl {
             case MANAGER_APPROVAL -> "manager_approval";
         };
 
-        // WORK_APPROVAL 전용: 서명 이미지 다운로드 URL 구성
-        // GET /api/excelwork/sign-image/{token} — token으로 requestMemberId 조회 후 스트리밍
+        // WORK_APPROVAL 전용: 배치 레벨 서명 이미지 URL (하위 호환용, token 기반)
+        // 미들웨어는 item.signImgUrl(per-item)을 우선 사용하고, 없을 경우 이 URL을 fallback으로 사용
         String signImgUrl = null;
         if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL) {
             signImgUrl = base + "/api/excelwork/sign-image/" + token;
@@ -516,6 +651,7 @@ public class ExcelWorkServiceImpl {
             // ── Report writeStatus → SUCCESS ──────────────────────────────────
             report.setWriteStatus(AppStatus.SUCCESS);
             report.setWriteDatetime(now);
+            report.setWriteMemberId(batch.getRequestMemberId());
 
             // ── batch successCount++ ──────────────────────────────────────────
             batch.setSuccessCount(batch.getSuccessCount() + 1);
@@ -808,7 +944,18 @@ public class ExcelWorkServiceImpl {
     @Transactional(readOnly = true)
     public ResponseEntity<Resource> streamSignImage(String token) {
         ReportJobBatch batch = findBatchByToken(token);
-        Long memberId = batch.getRequestMemberId();
+
+        // 서명 이미지는 배치 requestMember(로그인 사용자)가 아닌 성적서의 workMember 기준으로 조회한다.
+        List<ReportJobItem> signItems = itemRepository.findByBatchId(batch.getId());
+        if (signItems.isEmpty()) {
+            throw new EntityNotFoundException("배치에 처리 항목이 없습니다. (batchId: " + batch.getId() + ")");
+        }
+        Report signReport = reportRepository.findById(signItems.get(0).getReportId())
+                .orElseThrow(() -> new EntityNotFoundException("성적서를 찾을 수 없습니다."));
+        Long memberId = signReport.getWorkMemberId();
+        if (memberId == null) {
+            throw new IllegalArgumentException("실무자가 지정되지 않은 성적서입니다. (reportId: " + signReport.getId() + ")");
+        }
 
         // 해당 멤버의 서명 이미지 file_info 조회 (최신 1건)
         java.util.List<FileInfo> signFiles = fileInfoRepository
@@ -833,6 +980,47 @@ public class ExcelWorkServiceImpl {
 
         log.info("서명 이미지 스트리밍 — memberId: {}, fileInfoId: {}, key: {}",
                 memberId, fileInfo.getId(), objectKey);
+
+        return streamFromStorage(objectKey,
+                fileInfo.getOriginName() != null ? fileInfo.getOriginName() : "sign.png",
+                fileInfo.getContentType());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 11. streamSignImageByWorkMemberId — workMemberId 기반 서명 이미지 스트리밍 (per-item)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * workMemberId로 해당 실무자의 서명 이미지를 스토리지에서 스트리밍한다.
+     *
+     * WORK_APPROVAL 처리 시 item별 서명 이미지를 다운로드할 때 사용.
+     * 성적서별 실무자가 다를 수 있으므로 token 기반이 아닌 workMemberId 기반으로 직접 조회한다.
+     * 인증: X-Callback-Key 헤더 (컨트롤러 레벨).
+     *
+     * @param workMemberId 서명 이미지를 조회할 실무자 member id
+     */
+    @Transactional(readOnly = true)
+    public ResponseEntity<Resource> streamSignImageByWorkMemberId(Long workMemberId) {
+        java.util.List<FileInfo> signFiles = fileInfoRepository
+                .findByRefTableNameAndRefTableIdAndIsVisible(
+                        "member", workMemberId, com.bada.cali.common.enums.YnType.y);
+
+        if (signFiles.isEmpty()) {
+            throw new EntityNotFoundException(
+                    "서명 이미지를 찾을 수 없습니다. (workMemberId: " + workMemberId + ")");
+        }
+        FileInfo fileInfo = signFiles.get(signFiles.size() - 1);
+
+        String rootDir = storageProps.getRootDir();
+        String dir = fileInfo.getDir();
+        String objectKey = rootDir + "/" +
+                (dir.endsWith("/") ? dir : dir + "/") + fileInfo.getId();
+        if (fileInfo.getExtension() != null && !fileInfo.getExtension().isBlank()) {
+            objectKey += "." + fileInfo.getExtension();
+        }
+
+        log.info("서명 이미지 스트리밍 (per-item) — workMemberId: {}, fileInfoId: {}, key: {}",
+                workMemberId, fileInfo.getId(), objectKey);
 
         return streamFromStorage(objectKey,
                 fileInfo.getOriginName() != null ? fileInfo.getOriginName() : "sign.png",

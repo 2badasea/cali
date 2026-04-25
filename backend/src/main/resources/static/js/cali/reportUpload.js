@@ -1,12 +1,31 @@
 $(function () {
 	console.log('++ cali/reportUpload.js');
 
-	const $modal = $('.modal-view:not(.modal-view-applied)').first();
-	const $dropZone = $('#uploadDropZone', $modal);
-	const $fileInput = $('#reportUploadInput', $modal);
+	const $candidates = $('.modal-view:not(.modal-view-applied)');
+	let $modal;
+	// gModal은 .modal-body에 param을 저장하므로 .modal-body를 우선 선택
+	const $bodyCandidate = $candidates.filter('.modal-body');
+	if ($bodyCandidate.length) {
+		$modal = $bodyCandidate.first();
+	} else {
+		$modal = $candidates.first();
+	}
+	let $modal_root = $modal.closest('.modal');
 
 	// 현재 선택된 File 객체 배열
 	let selectedFiles = [];
+
+	// =====================================================================
+	// init_modal: 모달 파라미터 수신 후 초기화
+	// reportUpload는 파라미터 없이 호출되므로 파일 목록 초기화만 수행
+	// =====================================================================
+	$modal.init_modal = async (param) => {
+		$modal.param = param;
+		console.log('🚀 ~ $modal.param:', $modal.param);
+		// 모달이 재사용될 때 이전 선택 파일 초기화
+		selectedFiles = [];
+		renderFileList([]);
+	};
 
 	// =====================================================================
 	// 파일 목록 UI 업데이트
@@ -56,6 +75,9 @@ $(function () {
 	// =====================================================================
 	// 드래그앤드롭 이벤트 바인딩
 	// =====================================================================
+	const $dropZone = $('#uploadDropZone', $modal);
+	const $fileInput = $('#reportUploadInput', $modal);
+
 	$dropZone
 		.on('dragover dragenter', function (e) {
 			e.preventDefault();
@@ -226,8 +248,6 @@ $(function () {
 		renderFileList([]);
 
 		// 5. 결재 배치 생성 + 폴링
-		// workMemberId 기준 그룹화가 필요하나, 업로드 모달에서는 reportId만 알고 있으므로
-		// 단일 배치로 처리 (백엔드 createWorkApprovalBatch 에서 실무자 그룹 검증)
 		await doWorkApprovalFromModal(reportIds);
 	});
 
@@ -420,13 +440,21 @@ $(function () {
 	$modal.data('modal-data', $modal);
 	$modal.addClass('modal-view-applied');
 	if ($modal.hasClass('modal-body')) {
-		const $modal_root = $modal.closest('.modal');
-		$modal_root.on('modal_ready', function (e, p) {
-			if (typeof $modal.grid === 'object') $modal.grid.refreshLayout();
-		});
+		// gModal이 .modal-body.data('param')에 저장한 param을 읽어 init_modal 호출
+		setTimeout(() => {
+			const p = $modal.data('param') || {};
+			$modal.init_modal(p);
+			if (typeof $modal.grid == 'object') {
+				$modal.grid.refreshLayout();
+			}
+		}, 200);
 	}
 
-	if (typeof window.modal_deferred === 'object') {
+	if (typeof window.modal_deferred == 'object') {
 		window.modal_deferred.resolve('script end');
+	} else {
+		if (!$modal_root.length) {
+			initPage($modal);
+		}
 	}
 });

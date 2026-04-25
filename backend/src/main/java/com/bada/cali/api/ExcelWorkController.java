@@ -79,6 +79,42 @@ public class ExcelWorkController {
     }
 
     /**
+     * 실무자결재 작업 요청 — createWorkApprovalJob.
+     *
+     * 브라우저에서 결재 대상 성적서를 선택하고 호출.
+     * 응답의 excelworkUri를 window.location.href로 실행하면
+     * ExcelWorkApp이 기동되어 서명 삽입 + PDF 변환을 처리한다.
+     *
+     * 배치 내 모든 성적서는 동일한 workMember이어야 한다.
+     * (서명 이미지는 성적서의 workMember 기준으로 조회됨)
+     */
+    @Operation(
+            summary = "실무자결재 작업 요청 (ExcelWork)",
+            description = "결재 대상 성적서 id 목록을 받아 WORK_APPROVAL 배치를 생성하고 미들웨어 실행 URI를 반환. " +
+                    "서명 이미지는 로그인 사용자가 아닌 각 성적서의 workMember 기준으로 item별 삽입됨. " +
+                    "응답의 excelworkUri(excelwork://...)를 브라우저에서 실행하면 ExcelWorkApp이 서명 삽입 + PDF 변환을 처리함"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "배치 생성 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류, 유효하지 않은 성적서, 또는 실무자 서명 이미지 없음",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 성적서",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/batches/work-approval")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.CreateJobRes>> createWorkApprovalJob(
+            @Valid @RequestBody ExcelWorkDTO.CreateWorkApprovalJobReq req,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        ExcelWorkDTO.CreateJobRes res = excelWorkService.createWorkApprovalJob(req, user.getId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new ResMessage<>(1, String.format(
+                        "실무자결재 작업이 준비되었습니다. (%d건)", res.totalCount()), res));
+    }
+
+    /**
      * 비정상 종료 복구 — 고착 배치 초기화.
      *
      * READY/PROGRESS 상태로 고착된 배치를 CANCELED 로 전환하고
@@ -338,6 +374,39 @@ public class ExcelWorkController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         return excelWorkService.streamSignImage(token);
+    }
+
+    /**
+     * 서명 이미지 스트리밍 — workMemberId 기반 (per-item).
+     *
+     * WORK_APPROVAL 처리 시 item별로 서명 이미지를 다운로드할 때 사용.
+     * 성적서별 실무자가 다를 수 있으므로 token 대신 workMemberId를 직접 받아 조회한다.
+     * SecurityConfig /api/excelwork/sign-image/** permitAll 적용.
+     * 인증: X-Callback-Key 헤더.
+     */
+    @Operation(
+            summary = "서명 이미지 스트리밍 — workMemberId 기반 (미들웨어 per-item 처리용)",
+            description = "workMemberId로 해당 실무자의 서명 이미지를 스토리지에서 스트리밍. " +
+                    "WORK_APPROVAL 처리 시 item별 서명 이미지를 다운로드할 때 사용. " +
+                    "세션 인증 불필요, X-Callback-Key 인증"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "이미지 스트리밍 성공"),
+            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치"),
+            @ApiResponse(responseCode = "404", description = "해당 workMember의 서명 이미지 없음",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @GetMapping("/sign-image/member/{workMemberId}")
+    public ResponseEntity<Resource> streamSignImageByMember(
+            @Parameter(description = "실무자 member id") @PathVariable Long workMemberId,
+            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+    ) {
+        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return excelWorkService.streamSignImageByWorkMemberId(workMemberId);
     }
 
     /**

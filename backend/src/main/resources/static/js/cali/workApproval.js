@@ -294,10 +294,15 @@ $(function () {
 	}
 
 	// =====================================================================
-	// doWorkApproval: WORK_APPROVAL 배치 생성 + 폴링 진행상황 표시
-	// reportIds      : 결재 대상 성적서 id 배열 (단건 또는 다중)
+	// doWorkApproval: WORK_APPROVAL 배치 생성 → ExcelWorkApp 실행 → 백그라운드 폴링
+	// reportIds         : 결재 대상 성적서 id 배열 (단건 또는 다중)
 	// representReportNum: 타이틀용 성적서번호 (다중 시 "외 N건" 형태로 표시)
-	// skipConfirm    : true이면 결재 확인 다이얼로그 생략 (다중결재·단건 업로드 결재 시 사용)
+	// skipConfirm       : true이면 결재 확인 다이얼로그 생략 (다중결재·단건 업로드 결재 시 사용)
+	//
+	// ExcelWork 방식: 서명 삽입 + PDF 변환은 ExcelWorkApp(로컬 앱)이 처리.
+	//   - 배치 생성 후 excelwork:// URI를 실행 → ExcelWorkApp 기동
+	//   - 진행상황은 ExcelWorkApp 작업 목록에서 확인
+	//   - 브라우저는 백그라운드 폴링으로 완료를 감지하여 그리드만 갱신
 	// =====================================================================
 	async function doWorkApproval(reportIds, representReportNum, skipConfirm = false) {
 		if (!reportIds || reportIds.length === 0) return;
@@ -318,11 +323,11 @@ $(function () {
 			if (!confirmResult.isConfirmed) return;
 		}
 
-		// ── Step 2. 배치 생성 API 호출 ────────────────────────────────────
-		let batchId;
+		// ── Step 2. 배치 생성 API 호출 (ExcelWork 방식) ───────────────────
+		let batchId, excelworkUri;
 		try {
 			gLoadingMessage('실무자결재 작업을 준비합니다.');
-			const res = await fetch('/api/report/jobs/batches/work-approval', {
+			const res = await fetch('/api/excelwork/batches/work-approval', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json; charset=utf-8' },
 				body: JSON.stringify({ reportIds }),
@@ -331,7 +336,8 @@ $(function () {
 			if (!res.ok) throw res;
 			const resData = await res.json();
 			if (resData?.code > 0) {
-				batchId = resData.data.batchId;
+				batchId      = resData.data.batchId;
+				excelworkUri = resData.data.excelworkUri;
 			} else {
 				await gMessage('오류', resData.msg ?? '배치 생성 중 오류가 발생했습니다.', 'error', 'alert');
 				return;
@@ -342,70 +348,19 @@ $(function () {
 			return;
 		}
 
-		// ── Step 3. 폴링 진행상황 Swal 표시 ──────────────────────────────
-		const STEP_LABEL = {
-			DOWNLOADING_ORIGIN: 'origin 다운로드',
-			INSERTING_SIGN:     '서명 삽입',
-			CONVERTING_PDF:     'PDF 변환',
-			UPLOADING_SIGNED:   '파일 업로드',
-			DONE:               '완료',
-		};
+		// ── Step 3. ExcelWorkApp 실행 ─────────────────────────────────────
+		// excelwork:// URI로 로컬 ExcelWorkApp을 기동.
+		// ExcelWorkApp이 서명 삽입 + PDF 변환 + 업로드를 처리하며 앱 내 작업 목록에 진행상황 표시.
+		window.location.href = excelworkUri;
 
-		const buildProgressHtml = (batch) => {
-			const total   = batch.totalCount   ?? 0;
-			const success = batch.successCount ?? 0;
-			const fail    = batch.failCount    ?? 0;
-			const done    = success + fail;
-			const pct     = total > 0 ? Math.round((done / total) * 100) : 0;
+		// ── Step 4. 백그라운드 폴링 — 완료 시 그리드 갱신 ─────────────────
+		// ExcelWorkApp이 처리하는 동안 브라우저에서 조용히 폴링하여 완료를 감지한다.
+		// 진행상황 표시는 ExcelWorkApp 작업 목록에서 확인.
+		const MAX_POLL_COUNT  = 120; // 최대 10분 (5초 × 120회)
+		const POLL_INTERVAL   = 5000;
 
-			const itemRows = (batch.items ?? []).map(item => {
-				const badge =
-					item.status === 'SUCCESS'  ? '<span class="badge bg-success">완료</span>'  :
-					item.status === 'FAIL'     ? '<span class="badge bg-danger">실패</span>'   :
-					item.status === 'PROGRESS' ? `<span class="badge bg-primary">${STEP_LABEL[item.step] ?? item.step ?? '처리중'}</span>` :
-					                             '<span class="badge bg-secondary">대기</span>';
-				const failMsg = item.message
-					? `<br><small class="text-danger">${item.message}</small>` : '';
-				return `<tr>
-					<td class="text-start" style="font-size:0.85em;">성적서 #${item.reportId}</td>
-					<td>${badge}${failMsg}</td>
-				</tr>`;
-			}).join('');
-
-			return `
-				<div class="mb-2">
-					<div class="d-flex justify-content-between mb-1" style="font-size:0.85em;">
-						<span>${done} / ${total}건 처리됨</span><span>${pct}%</span>
-					</div>
-					<div class="progress" style="height:12px;">
-						<div class="progress-bar progress-bar-striped progress-bar-animated"
-							role="progressbar" style="width:${pct}%;"></div>
-					</div>
-				</div>
-				<div style="max-height:200px; overflow-y:auto;">
-					<table class="table table-sm table-bordered mb-0" style="font-size:0.85em;">
-						<tbody>${itemRows}</tbody>
-					</table>
-				</div>`;
-		};
-
-		Swal.fire({
-			title: '실무자결재 처리 중...',
-			html: '<div id="workApprovalProgressBody">준비 중...</div>',
-			allowOutsideClick: false,
-			allowEscapeKey: false,
-			showConfirmButton: false,
-			didOpen: () => { Swal.showLoading(); },
-		});
-
-		// ── Step 4. Polling 루프 (5초 간격, 최대 5분) ────────────────────
-		const POLL_INTERVAL_MS = 5000;
-		const MAX_POLL_COUNT   = 60;
-		let pollCount = 0;
-
-		while (pollCount < MAX_POLL_COUNT) {
-			await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-			pollCount++;
+		for (let pollCount = 0; pollCount < MAX_POLL_COUNT; pollCount++) {
+			await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
 
 			try {
 				const pollRes = await fetch(`/api/report/jobs/batches/${batchId}`);
@@ -414,12 +369,8 @@ $(function () {
 				if (!pollData || pollData.code <= 0) continue;
 
 				const batch = pollData.data;
-				const progressEl = document.getElementById('workApprovalProgressBody');
-				if (progressEl) progressEl.innerHTML = buildProgressHtml(batch);
 
 				if (['SUCCESS', 'FAIL', 'CANCELED'].includes(batch.status)) {
-					Swal.hideLoading();
-
 					if (batch.status === 'SUCCESS') {
 						const icon = batch.failCount > 0 ? 'warning' : 'success';
 						await gMessage(
@@ -440,13 +391,8 @@ $(function () {
 				}
 
 			} catch (pollErr) {
-				console.warn('[workApproval] Polling 오류:', pollErr);
+				console.warn('[workApproval] 폴링 오류:', pollErr);
 			}
-		}
-
-		if (pollCount >= MAX_POLL_COUNT) {
-			Swal.close();
-			await gMessage('시간 초과', '작업 진행상황을 확인할 수 없습니다.<br>잠시 후 다시 확인해 주세요.', 'warning', 'alert');
 		}
 	}
 
@@ -872,7 +818,7 @@ $(function () {
 				{},
 				{
 					title: '성적서업로드',
-					size: 'sm',
+					size: 'md',
 					show_close_button: true,
 					show_confirm_button: false,
 				}

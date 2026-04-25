@@ -117,26 +117,6 @@ public class ReportJobBatchController {
     }
 
     /**
-     * 배치 진행상황 조회 (브라우저 Polling용)
-     *
-     * 성적서작성 모달 또는 작업 현황 UI에서 일정 주기로 호출한다.
-     * 배치 전체 상태 + 소속 item 목록(status, step, message)을 반환한다.
-     *
-     * 인증된 사용자만 접근 가능 (Security 기본 설정).
-     */
-    @Operation(
-            summary = "배치 진행상황 조회 (Polling)",
-            description = "브라우저에서 일정 주기로 호출하여 배치와 개별 item의 진행상황을 조회. " +
-                    "인증된 사용자만 접근 가능"
-    )
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "조회 성공"),
-            @ApiResponse(responseCode = "404", description = "존재하지 않는 배치 id",
-                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
-            @ApiResponse(responseCode = "500", description = "서버 오류",
-                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
-    })
-    /**
      * 실무자결재 사전 검증 (사이드이펙트 없음)
      *
      * 배치 생성 전 대상 성적서들의 결재 가능 여부를 순수하게 조회한다.
@@ -162,6 +142,26 @@ public class ReportJobBatchController {
         return ResponseEntity.ok(new ResMessage<>(1, "검증 완료", res));
     }
 
+    /**
+     * 배치 진행상황 조회 (브라우저 Polling용)
+     *
+     * 성적서작성 모달 또는 작업 현황 UI에서 일정 주기로 호출한다.
+     * 배치 전체 상태 + 소속 item 목록(status, step, message)을 반환한다.
+     *
+     * 인증된 사용자만 접근 가능 (Security 기본 설정).
+     */
+    @Operation(
+            summary = "배치 진행상황 조회 (Polling)",
+            description = "브라우저에서 일정 주기로 호출하여 배치와 개별 item의 진행상황을 조회. " +
+                    "인증된 사용자만 접근 가능"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 배치 id",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
     @GetMapping("/batches/{batchId}")
     public ResponseEntity<ResMessage<ReportJobBatchDTO.BatchStatusRes>> getBatchStatus(
             @Parameter(description = "배치 id", example = "123") @PathVariable Long batchId

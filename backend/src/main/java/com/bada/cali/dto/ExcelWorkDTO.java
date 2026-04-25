@@ -48,6 +48,24 @@ public class ExcelWorkDTO {
         private String serverUrl;
     }
 
+    @Getter
+    @Setter
+    @Schema(description = "실무자결재 작업 요청")
+    public static class CreateWorkApprovalJobReq {
+
+        @NotEmpty
+        @Schema(description = "결재 대상 성적서 id 목록 (1건 이상)", example = "[1, 2, 3]")
+        private List<Long> reportIds;
+
+        /**
+         * 미들웨어가 콜백을 보낼 서버 URL.
+         * null이면 서버의 app.cali.callback-base-url 설정값 사용.
+         */
+        @Schema(description = "미들웨어가 콜백을 보낼 CALI 서버 URL (null 허용, 서버 설정값 폴백)",
+                example = "https://mycali.com")
+        private String serverUrl;
+    }
+
     /** createJob 응답 — 브라우저가 excelworkUri를 URI 스킴으로 실행 */
     public record CreateJobRes(
             @Schema(description = "생성된 배치 id") Long batchId,
@@ -114,7 +132,10 @@ public class ExcelWorkDTO {
             @Schema(description = "성적서번호 (없으면 null)") String reportNum,
             @Schema(description = "파일 다운로드 식별 UUID") String fileUuid,
             @Schema(description = "파일 다운로드 URL (GET /api/excelwork/file/{fileUuid})") String fileDownloadUrl,
-            @Schema(description = "셀 삽입 데이터 (fieldCode → 값 문자열)") Map<String, String> data
+            @Schema(description = "셀 삽입 데이터 (fieldCode → 값 문자열)") Map<String, String> data,
+            @Schema(description = "서명 이미지 URL — WORK_APPROVAL 전용, 이 item 성적서의 workMember 서명 이미지. " +
+                    "GET /api/excelwork/sign-image/member/{workMemberId}. 그 외 null", nullable = true)
+            String signImgUrl
     ) {}
 
     // ── 미들웨어 → 서버 콜백 요청 ────────────────────────────────────────────
