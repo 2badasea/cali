@@ -230,11 +230,14 @@ $(function () {
 			}
 		}
 
-		// ── Step 4. ExcelWork 배치 생성 + 미들웨어 기동 ──────────────────────
+		// ── Step 4. ExcelWork 배치 생성 + 미들웨어 기동 + 완료 폴링 ─────────────
+		// doWorkApproval()(workApproval.js)과 동일한 패턴으로 처리한다.
+		//   - POST /api/excelwork/batches → batchId + excelworkUri 수신
+		//   - ExcelWork 미들웨어가 성적서를 작성하고 서버에 콜백 → writeStatus / writeMemberId 갱신
+		//   - 브라우저는 batchId로 폴링하여 완료 감지 후 그리드를 리로드한다.
 
 		// 4-1. ExcelWork 배치 생성 API 호출 (POST /api/excelwork/batches)
-		//      응답에 포함된 excelworkUri(excelwork://...) 를 브라우저에서 실행하면
-		//      ExcelWorkApp 미들웨어가 기동되어 성적서작성 작업을 처리한다.
+		let batchId;
 		let excelworkUri;
 		let totalCount;
 		try {
@@ -248,7 +251,8 @@ $(function () {
 			if (!res.ok) throw res;
 			const resData = await res.json();
 			if (resData?.code > 0) {
-				excelworkUri = resData.data.excelworkUri;
+				batchId      = resData.data.batchId;       // 폴링에 사용
+				excelworkUri = resData.data.excelworkUri;  // ExcelWork 미들웨어 실행 URI
 				totalCount   = resData.data.totalCount;
 			} else {
 				await gMessage('오류', resData.msg ?? '배치 생성 중 오류가 발생했습니다.', 'error', 'alert');
@@ -278,8 +282,33 @@ $(function () {
 		// 4-4. URI 스킴으로 ExcelWorkApp 기동 (excelwork://process?token=...&serverUrl=...)
 		window.location.href = excelworkUri;
 
-		// 4-5. workApproval 그리드 리로드 (writeStatus 변경 반영)
-		$(document).trigger('reportWriteCompleted');
+		// 4-5. 배치 완료 폴링 — doWorkApproval()과 동일한 패턴
+		//      GET /api/report/jobs/batches/{batchId} 를 5초 간격으로 호출하여
+		//      SUCCESS / FAIL / CANCELED 감지 시 그리드를 리로드한다.
+		//      최대 120회(10분) 후 타임아웃 처리.
+		const POLL_INTERVAL  = 5000;  // 5초
+		const MAX_POLL_COUNT = 120;   // 최대 10분
+
+		for (let pollCount = 0; pollCount < MAX_POLL_COUNT; pollCount++) {
+			await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+
+			try {
+				const pollRes = await fetch(`/api/report/jobs/batches/${batchId}`, { method: 'GET' });
+				if (!pollRes.ok) continue; // 일시적 오류는 스킵하고 계속 폴링
+
+				const pollData = await pollRes.json();
+				const batch = pollData?.data;
+				if (!batch) continue;
+
+				if (['SUCCESS', 'FAIL', 'CANCELED'].includes(batch.status)) {
+					// 완료 감지 → workApproval 그리드 리로드 이벤트 발행
+					$(document).trigger('reportWriteCompleted');
+					break;
+				}
+			} catch (e) {
+				// 폴링 중 예외는 무시하고 계속
+			}
+		}
 	});
 
 	// =====================================================================
