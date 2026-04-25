@@ -688,6 +688,14 @@ public class ExcelWorkServiceImpl {
                     .createMemberId(batch.getRequestMemberId())
                     .build());
 
+            // ── detach된 엔티티 재병합 ─────────────────────────────────────────
+            // softDeleteByRefAndNames의 @Modifying(clearAutomatically=true)가 영속성 컨텍스트를
+            // 초기화하므로, report/item/batch 가 detach 된 상태. 명시적 save()로 재병합해야
+            // 위 setter 변경사항(writeStatus, writeMemberId 등)이 커밋 시 DB에 반영된다.
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
+
         } catch (Exception e) {
             log.error("callbackItemDone 처리 실패 — itemId: {}, reportId: {}: {}",
                     itemId, report.getId(), e.getMessage(), e);
@@ -711,6 +719,11 @@ public class ExcelWorkServiceImpl {
                     .createDatetime(now)
                     .createMemberId(batch.getRequestMemberId())
                     .build());
+
+            // detach된 엔티티 재병합 (실패 경로)
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
         }
 
         // ── 전체 완료 여부 확인 ──────────────────────────────────────────────
@@ -920,6 +933,14 @@ public class ExcelWorkServiceImpl {
                     .createMemberId(batch.getRequestMemberId())
                     .build());
 
+            // ── detach된 엔티티 재병합 ─────────────────────────────────────────
+            // softDeleteByRefAndNames의 @Modifying(clearAutomatically=true)가 영속성 컨텍스트를
+            // 초기화하므로, report/item/batch 가 detach 된 상태. 명시적 save()로 재병합해야
+            // 위 setter 변경사항(workStatus, workDatetime 등)이 커밋 시 DB에 반영된다.
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
+
         } catch (Exception e) {
             log.error("callbackApprovalItemDone 처리 실패 — itemId: {}, reportId: {}: {}",
                     itemId, report.getId(), e.getMessage(), e);
@@ -940,6 +961,11 @@ public class ExcelWorkServiceImpl {
                     .createDatetime(now)
                     .createMemberId(batch.getRequestMemberId())
                     .build());
+
+            // detach된 엔티티 재병합 (실패 경로)
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
         }
 
         int processed = batch.getSuccessCount() + batch.getFailCount();
