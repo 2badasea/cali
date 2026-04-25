@@ -387,7 +387,7 @@ $(function () {
 			} catch (err) {
 				console.log('에러발생');
 				console.error(err);
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				Swal.close();
 				return false;

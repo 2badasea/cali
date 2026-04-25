@@ -33,7 +33,7 @@ $(function () {
 				gToast('목록을 불러오지 못했습니다.', 'warning');
 			}
 		} catch (xhr) {
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 
@@ -158,7 +158,7 @@ $(function () {
 			}
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 
@@ -256,7 +256,7 @@ $(function () {
 			}
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 

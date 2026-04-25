@@ -298,7 +298,7 @@ $(function () {
 					return false;
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				$btn.prop('disabled', false);
 			}

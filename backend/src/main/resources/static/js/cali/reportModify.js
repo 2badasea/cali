@@ -104,7 +104,7 @@
 				}
 			}
 		} catch (xhr) {
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		} finally {
 		}
 
@@ -203,7 +203,7 @@
 				throw new Error('/api/basic/getItemCodeInfos 호출 실패');
 			}
 		} catch (xhr) {
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 
@@ -290,7 +290,7 @@
 					$modal.setChildNumbering();
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				$btn.prop('disabled', false);
 			}
@@ -558,7 +558,7 @@
 			}
 		} catch (err) {
 			console.error(err);
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 		} finally {
 			swal.close();
 			$btn.prop('disabled', false);
@@ -664,7 +664,7 @@
 				}
 			}
 		} catch (xhr) {
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 

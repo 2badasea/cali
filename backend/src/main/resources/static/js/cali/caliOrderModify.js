@@ -96,7 +96,7 @@
 					}
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 			}
 
@@ -589,7 +589,7 @@
 
 				// 저장이 정상적으로 이루어지면, 모달을 닫는다.
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				$btn.prop('disabled', false);
 				return false;

@@ -471,7 +471,7 @@
 					await gMessage('성적서 저장 실패', '', 'warning');
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				$saveBtn.prop('disabled', false);
 			}

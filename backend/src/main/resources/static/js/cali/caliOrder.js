@@ -330,7 +330,7 @@ $(function () {
 							$modal.grid.reloadData();
 						}
 					} catch (err) {
-						customAjaxHandler(err);
+						await gApiErrorHandler(err);
 					} finally {
 					}
 				} else {

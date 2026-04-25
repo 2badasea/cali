@@ -453,54 +453,6 @@ function gSetData(key, value, storage = localStorage) {
 	storage.setItem(key, data);
 }
 
-/**
- * 비동기 통신 에러에 대한 응답 처리
- *
- * @param   {[type]}  err  [err description]
- *
- * @return  {[type]}       [return description]
- */
-function customAjaxHandler(err) {
-	// jQuery xhr 스타일에 맞춰서 구현
-	console.error('customAjaxHandler문 동작!!');
-	console.error(err);
-
-	// 일반 Error(message) 처리
-	if (err instanceof Error) {
-		gToast(err.message || '요청 중 오류가 발생했습니다.', 'error');
-		return false;
-	}
-
-	const xhr = err?.xhr || err;
-	const status = xhr?.status;
-	const respJSON = xhr?.responseJSON;
-
-	// 옵셔널체이닝 문법(null/undefined이면 에러를 발생시키지 않고, undefined를 반환.)
-	if (respJSON?.code != undefined && respJSON?.msg != undefined) {
-		gToast(respJSON.msg, 'error');
-	}
-	// 다른 형식으로 받는 경우
-	else {
-		gToast('요청을 처리 중 서버에서 오류가 발생했습니다. 적절한 응답 형식을 찾지 못했습니다.', 'error');
-	}
-	return false;
-
-	// NOTE 아래 소스들은 우선 모두 주석처리
-	const respText = xhr?.responseText;
-	// 서버가 JSON으로 { message: "..."} 내려주는 경우
-	const msgFromJson = respJSON?.message || respJSON?.error || respJSON?.detail;
-
-	// 텍스트 응답에서 메시지 추출
-	const msgText = typeof respText === 'string' && respText.length < 300 ? respText : null;
-
-	const message = msgFromJson || msgText || xhr?.statusText || err?.message || '요청 처리 중 오류가 발생했습니다.';
-	console.log('🚀 ~ customAjaxHandler ~ message:', message);
-
-	// 상태코드가 있으면 붙여주면 디버깅 편함
-	const label = status ? `[${status}] ${message}` : message;
-
-	gToast(label, 'error');
-}
 
 /**
  * 입력값 검증(로컬 로직) 전용 에러 핸들러

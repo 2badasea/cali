@@ -41,7 +41,7 @@ $(function () {
 					$modal.setSmallCode(itemInfo.middleItemCodeId, itemInfo.smallItemCodeId); // 중소분류 세팅
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 			}
 
@@ -319,7 +319,7 @@ $(function () {
 		} catch (err) {
 			Swal.close();
 			console.log(err);
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 		} finally {
 		}
 

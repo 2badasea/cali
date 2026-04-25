@@ -32,7 +32,7 @@ $(function () {
 					}
 				},
 				error: function (xhr) {
-					customAjaxHandler(xhr);
+					gApiErrorHandler(xhr);
 				},
 				complete: function (data) {},
 			}
@@ -98,7 +98,7 @@ $(function () {
 				}
 			} catch (err) {
 				Swal.close();
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			}
 		} else {
 			return false;

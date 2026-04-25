@@ -42,7 +42,7 @@ $(function () {
 			}
 		} catch (xhr) {
 			console.error('통신에러');
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 
@@ -223,7 +223,7 @@ $(function () {
 						}
 					} catch (err) {
 						console.error(err);
-						customAjaxHandler(err);
+						await gApiErrorHandler(err);
 					} finally {
 						Swal.close();
 					}
@@ -357,7 +357,7 @@ $(function () {
 							await gMessage('품목 삭제', resDelete.msg ?? '삭제에 실패했습니다.', 'error', 'alert');
 						}
 					} catch (err) {
-						customAjaxHandler(err);
+						await gApiErrorHandler(err);
 					} finally {
 						Swal.close();
 					}

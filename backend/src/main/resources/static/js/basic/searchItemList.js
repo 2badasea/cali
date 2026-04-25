@@ -220,7 +220,7 @@ $(function () {
 			}
 		} catch (xhr) {
 			console.error('통신에러');
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 

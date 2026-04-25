@@ -363,7 +363,7 @@
 					return false;
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 				Swal.close();
 			} finally {
 				$btn.prop('disabled', false);
@@ -460,7 +460,7 @@
 			}
 		} catch (xhr) {
 			console.error('통신에러');
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 

@@ -200,7 +200,7 @@ $(function () {
 						throw resSave;
 					}
 				} catch (xhr) {
-					customAjaxHandler(xhr);
+					await gApiErrorHandler(xhr);
 				} finally {
 					$btn.prop('disabled', false);
 				}

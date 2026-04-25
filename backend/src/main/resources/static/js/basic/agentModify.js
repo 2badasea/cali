@@ -51,7 +51,7 @@ $(function () {
 					}
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 			}
 
@@ -244,7 +244,7 @@ $(function () {
 			} catch (err) {
 				Swal.close(); // sweet alert창 있을 경우 닫아버리기
 				// 에러처리
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				$btn.prop('disabled', false);
 			}
@@ -464,7 +464,7 @@ $(function () {
 					await gMessage(`업체정보 ${saveTypeTxt} 실패`, `업체정보가 ${saveTypeTxt}에 실패했습니다.`, 'warning');
 				}
 			} catch (err) {
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			} finally {
 				Swal.close();
 				$('.btn_save', $modal).prop('disabled', false);

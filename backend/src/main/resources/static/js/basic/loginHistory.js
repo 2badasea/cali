@@ -37,7 +37,7 @@ $(function () {
 			}
 		} catch (err) {
 			console.log('catch!');
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 		} finally {
 			Swal.close();
 			$(this).prop('disabled', false);

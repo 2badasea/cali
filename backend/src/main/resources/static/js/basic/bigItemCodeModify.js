@@ -177,7 +177,7 @@ $(function () {
 					}
 				} catch (err) {
 					console.error(err);
-					customAjaxHandler(err);
+					await gApiErrorHandler(err);
 				} finally {
 					Swal.close();
 				}
@@ -346,7 +346,7 @@ $(function () {
 				return false;
 			}
 		} catch (err) {
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 		} finally {
 			$btn.prop('disabled', false);
 		}

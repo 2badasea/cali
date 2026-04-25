@@ -132,7 +132,7 @@ $(function () {
 			}
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			inputEl.value = '';
 			return;
 		}
@@ -202,7 +202,7 @@ $(function () {
 			}
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 
@@ -297,7 +297,7 @@ $(function () {
 			}
 		} catch (xhr) {
 			console.error('통신에러');
-			customAjaxHandler(xhr);
+			await gApiErrorHandler(xhr);
 		}
 	};
 
@@ -673,7 +673,7 @@ $(function () {
 				}
 			} catch (err) {
 				swal.close();
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 			}
 		})
 		// 버튼: 성적서업로드 → 성적서업로드 모달 호출
@@ -763,7 +763,7 @@ $(function () {
 				validateResult = resData.data;
 			} catch (err) {
 				swal.close();
-				customAjaxHandler(err);
+				await gApiErrorHandler(err);
 				return;
 			}
 

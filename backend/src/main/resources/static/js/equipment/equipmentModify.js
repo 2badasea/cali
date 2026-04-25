@@ -60,7 +60,7 @@ $(function () {
 					}
 				}
 			} catch (xhr) {
-				customAjaxHandler(xhr);
+				await gApiErrorHandler(xhr);
 			} finally {
 			}
 
@@ -246,7 +246,7 @@ $(function () {
 					throw { xhr: { status: resSave.status, responseJSON: 'fetch 통신 오류' } };
 				}
 			} catch (xhr) {
-				customAjaxHandler(xhr);
+				await gApiErrorHandler(xhr);
 				return false;
 			} finally {
 				Swal.close();

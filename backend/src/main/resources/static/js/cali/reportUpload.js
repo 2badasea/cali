@@ -218,7 +218,7 @@ $(function () {
 			swal.close();
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 
@@ -239,7 +239,7 @@ $(function () {
 			swal.close();
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 
@@ -268,7 +268,7 @@ $(function () {
 			swal.close();
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 
@@ -289,7 +289,7 @@ $(function () {
 			swal.close();
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 
@@ -326,7 +326,7 @@ $(function () {
 			}
 		} catch (err) {
 			swal.close();
-			customAjaxHandler(err);
+			await gApiErrorHandler(err);
 			return;
 		}
 

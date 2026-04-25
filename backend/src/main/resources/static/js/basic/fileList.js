@@ -54,7 +54,7 @@ $(function () {
 						await gMessage(`파일 삭제`, `삭제처리에 실패했습니다.`, 'warning', 'alert');
 					}
 				} catch (xhr) {
-					customAjaxHandler(xhr);
+					await gApiErrorHandler(xhr);
 				} finally {
 				}
 			} else {
