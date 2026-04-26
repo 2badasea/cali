@@ -170,4 +170,57 @@ public class ExcelWorkDTO {
         @Schema(description = "복구 대상 성적서 id 목록", example = "[1, 2, 3]")
         private List<Long> reportIds;
     }
+
+    // ── 스마트 복구 (파일 존재 여부 기반) ────────────────────────────────────
+
+    @Getter
+    @Setter
+    @Schema(description = "스마트 복구 요청 — 스토리지 파일 존재 여부를 확인하여 완료 처리 또는 초기화")
+    public static class SmartRecoverReq {
+
+        @NotEmpty
+        @Schema(description = "복구 대상 성적서 id 목록 (writeStatus READY/PROGRESS 인 것만 유효)", example = "[1, 2, 3]")
+        private List<Long> reportIds;
+    }
+
+    /**
+     * 스마트 복구 미리보기/실행 결과의 성적서 단건 정보.
+     *
+     * @param reportId              성적서 id
+     * @param reportNum             성적서 번호 (없으면 null)
+     * @param batchStartedMinutesAgo 배치 시작으로부터 경과 분 (배치가 시작되지 않았거나 없으면 null)
+     */
+    public record RecoverItemInfo(
+            @Schema(description = "성적서 id") Long reportId,
+            @Schema(description = "성적서 번호") String reportNum,
+            @Schema(description = "배치 시작으로부터 경과 분 (배치 미시작 또는 없으면 null)", nullable = true)
+            Long batchStartedMinutesAgo
+    ) {}
+
+    /**
+     * 스마트 복구 미리보기 응답.
+     * 실제 DB 변경 없이 파일 존재 여부만 확인하여 예상 처리 결과를 반환한다.
+     *
+     * @param successItems 파일 확인됨 — 완료 처리(SUCCESS)될 성적서 목록
+     * @param idleItems    파일 없음 — 초기화(IDLE)될 성적서 목록
+     */
+    public record RecoverPreviewRes(
+            @Schema(description = "파일 확인됨 — 완료 처리될 성적서 목록") List<RecoverItemInfo> successItems,
+            @Schema(description = "파일 없음 — 초기화될 성적서 목록")     List<RecoverItemInfo> idleItems
+    ) {}
+
+    /**
+     * 스마트 복구 실행 결과.
+     *
+     * @param successCount      완료 처리된 건수
+     * @param idleCount         초기화된 건수
+     * @param successReportNums 완료 처리된 성적서 번호 목록
+     * @param idleReportNums    초기화된 성적서 번호 목록
+     */
+    public record SmartRecoverRes(
+            @Schema(description = "완료 처리된 건수") int successCount,
+            @Schema(description = "초기화된 건수")   int idleCount,
+            @Schema(description = "완료 처리된 성적서 번호 목록") List<String> successReportNums,
+            @Schema(description = "초기화된 성적서 번호 목록")    List<String> idleReportNums
+    ) {}
 }

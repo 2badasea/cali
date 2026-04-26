@@ -21,6 +21,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 /**
  * ExcelWork 미들웨어 연동 API.
  *
@@ -142,6 +144,67 @@ public class ExcelWorkController {
     ) {
         excelWorkService.resetBatches(req.getReportIds(), user.getId());
         return ResponseEntity.ok(new ResMessage<>(1, "배치 상태 초기화 완료", null));
+    }
+
+    /**
+     * 스마트 복구 미리보기 — DB 변경 없이 파일 존재 여부만 확인.
+     *
+     * 스토리지에서 origin.xlsx 존재 여부를 확인하여
+     * "완료 처리될 목록"과 "초기화될 목록"을 미리 반환한다.
+     * 실제 복구는 PATCH /smart-recover 에서 수행.
+     */
+    @Operation(
+            summary = "스마트 복구 미리보기",
+            description = "성적서 id 목록 기준으로 스토리지 파일 존재 여부를 확인하여 예상 복구 결과를 반환. " +
+                    "DB 변경 없음 — 조회 전용. writeStatus 가 READY/PROGRESS 인 성적서만 처리됨"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "미리보기 조회 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @GetMapping("/recover-preview")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.RecoverPreviewRes>> recoverPreview(
+            @Parameter(description = "복구 대상 성적서 id 목록 (반복 파라미터)", example = "1")
+            @RequestParam List<Long> reportIds,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        if (reportIds == null || reportIds.isEmpty()) {
+            throw new IllegalArgumentException("복구 대상 성적서 id 목록이 비어 있습니다.");
+        }
+        ExcelWorkDTO.RecoverPreviewRes preview = excelWorkService.previewRecover(reportIds);
+        return ResponseEntity.ok(new ResMessage<>(1, "미리보기 조회 완료", preview));
+    }
+
+    /**
+     * 스마트 복구 실행.
+     *
+     * 파일 있음 → writeStatus=SUCCESS (callbackItemDone 재현, file_info 재등록).
+     * 파일 없음 → writeStatus=IDLE (writeMemberId/writeDatetime 초기화, file_info soft-delete).
+     * 배치 상태: 전체 SUCCESS → SUCCESS / 전체 취소 → CANCELED / 혼합 → FAIL.
+     */
+    @Operation(
+            summary = "스마트 복구 실행",
+            description = "성적서 id 목록 기준으로 스토리지 파일 존재 여부를 확인하여 스마트 복구 실행. " +
+                    "파일 있음 → SUCCESS 완료처리 / 파일 없음 → IDLE 초기화. " +
+                    "이미 SUCCESS 인 성적서는 건너뜀"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "복구 완료"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PatchMapping("/smart-recover")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.SmartRecoverRes>> smartRecover(
+            @Valid @RequestBody ExcelWorkDTO.SmartRecoverReq req,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        ExcelWorkDTO.SmartRecoverRes result = excelWorkService.smartRecover(req.getReportIds(), user.getId());
+        return ResponseEntity.ok(new ResMessage<>(1, "스마트 복구 완료", result));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

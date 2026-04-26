@@ -623,10 +623,11 @@ $(function () {
 			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 			$modal.grid.getPagination().movePageTo(currentPage);
 		})
-		// 버튼: 비정상 종료 복구
+		// 버튼: 비정상 종료 복구 (스마트 복구)
 		// 1) 체크된 항목 없으면 warning
-		// 2) writeStatus 가 READY 또는 PROGRESS 인 항목만 대상
-		// 3) 확인 후 PATCH /api/excelwork/reset → 배치 CANCELED 처리 + 성적서 writeStatus IDLE 복구
+		// 2) writeStatus 가 READY 또는 PROGRESS 인 항목만 대상 (SUCCESS 는 이미 완료이므로 제외)
+		// 3) GET /api/excelwork/recover-preview → 스토리지 파일 존재 여부 확인 후 예상 결과 미리보기
+		// 4) 확인 후 PATCH /api/excelwork/smart-recover → 파일 있음: SUCCESS 완료처리 / 파일 없음: IDLE 초기화
 		.on('click', '.btnWriteReset', async function () {
 			const checkedRows = $modal.grid.getCheckedRows();
 			if (!checkedRows || checkedRows.length === 0) {
@@ -634,8 +635,7 @@ $(function () {
 				return;
 			}
 
-			// READY/PROGRESS 상태인 항목의 성적서 id 목록 추출
-			// (배치 id를 직접 갖고 있지 않으므로 report.id 기반으로 서버에서 배치 조회)
+			// READY/PROGRESS 상태인 항목만 대상 (SUCCESS 는 이미 완료)
 			const targetRows = checkedRows.filter(r => r.writeStatus === 'READY' || r.writeStatus === 'PROGRESS');
 			if (targetRows.length === 0) {
 				gToast('복구 대상 항목이 없습니다. (작성대기/작성중 상태만 복구 가능)', 'warning');
@@ -644,32 +644,94 @@ $(function () {
 
 			const reportIds = targetRows.map(r => r.id);
 
-			const confirmResult = await gMessage(
-				'비정상 종료 복구',
-				`${reportIds.length}건의 성적서작성 상태를 미작성(IDLE)으로 복구하시겠습니까?<br>` +
-				`<small class="text-muted">미들웨어 비정상 종료 후 고착된 상태를 초기화합니다.</small>`,
-				'question',
-				'confirm',
-				{ confirmButtonText: '복구' }
-			);
-			if (!confirmResult.isConfirmed) return;
-
 			try {
-				gLoadingMessage('상태 복구 중...');
-				const res = await fetch('/api/excelwork/reset', {
+				// ── Step 1. 스토리지 파일 존재 여부 미리 확인 ─────────────────────
+				gLoadingMessage('스토리지 파일 확인 중...');
+
+				const params = new URLSearchParams();
+				reportIds.forEach(id => params.append('reportIds', id));
+				const previewRes = await fetch(`/api/excelwork/recover-preview?${params.toString()}`);
+				swal.close();
+				if (!previewRes.ok) throw previewRes;
+				const previewData = await previewRes.json();
+				if (!previewData || previewData.code <= 0) {
+					await gMessage('오류', previewData?.msg ?? '미리보기 조회 중 오류가 발생했습니다.', 'error', 'alert');
+					return;
+				}
+
+				const { successItems, idleItems } = previewData.data;
+
+				// 모든 항목이 이미 완료 상태여서 처리 대상 없음
+				if (successItems.length === 0 && idleItems.length === 0) {
+					await gMessage('알림', '복구할 항목이 없습니다.<br><small class="text-muted">선택된 성적서가 모두 이미 완료 상태입니다.</small>', 'info', 'alert');
+					return;
+				}
+
+				// ── Step 2. 예상 결과 미리보기 확인 다이얼로그 ────────────────────
+				let htmlContent = '<div class="text-start">';
+
+				if (successItems.length > 0) {
+					const nums = successItems.map(i => {
+						const label = i.reportNum ?? `#${i.reportId}`;
+						const elapsed = i.batchStartedMinutesAgo != null
+							? ` <span class="text-muted small">(${i.batchStartedMinutesAgo}분 전 시작)</span>`
+							: '';
+						return `<li>${label}${elapsed}</li>`;
+					}).join('');
+					htmlContent += `
+						<p class="mb-1 fw-bold text-success">✔ 완료 처리 (파일 확인됨) — ${successItems.length}건</p>
+						<ul class="mb-3 small">${nums}</ul>`;
+				}
+
+				if (idleItems.length > 0) {
+					const nums = idleItems.map(i => {
+						const label = i.reportNum ?? `#${i.reportId}`;
+						const elapsed = i.batchStartedMinutesAgo != null
+							? ` <span class="text-muted small">(${i.batchStartedMinutesAgo}분 전 시작)</span>`
+							: '';
+						return `<li>${label}${elapsed}</li>`;
+					}).join('');
+					htmlContent += `
+						<p class="mb-1 fw-bold text-warning">↩ 초기화 (파일 없음) — ${idleItems.length}건</p>
+						<ul class="mb-3 small">${nums}</ul>`;
+				}
+
+				htmlContent += `
+					<div class="alert alert-warning small mb-0 p-2">
+						⚠ ExcelWork 앱이 현재 실행 중이라면 진행 중인 작업이 강제로 중단됩니다.
+					</div>
+				</div>`;
+
+				const confirmResult = await gMessage(
+					'비정상 종료 복구',
+					htmlContent,
+					'question',
+					'confirm',
+					{ confirmButtonText: '복구 실행', cancelButtonText: '취소' }
+				);
+				if (!confirmResult.isConfirmed) return;
+
+				// ── Step 3. 스마트 복구 실행 ──────────────────────────────────────
+				gLoadingMessage('복구 처리 중...');
+				const recoverRes = await fetch('/api/excelwork/smart-recover', {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json; charset=utf-8' },
 					body: JSON.stringify({ reportIds }),
 				});
 				swal.close();
-				if (!res.ok) throw res;
-				const resData = await res.json();
-				if (resData?.code > 0) {
-					await gMessage('복구 완료', '성적서작성 상태가 복구되었습니다.', 'success', 'alert');
+				if (!recoverRes.ok) throw recoverRes;
+				const recoverData = await recoverRes.json();
+
+				if (recoverData?.code > 0) {
+					const { successCount, idleCount } = recoverData.data;
+					let resultHtml = '';
+					if (successCount > 0) resultHtml += `<p class="mb-1 text-success">✔ 완료 처리: ${successCount}건</p>`;
+					if (idleCount > 0)    resultHtml += `<p class="mb-0 text-secondary">↩ 초기화: ${idleCount}건</p>`;
+					await gMessage('복구 완료', resultHtml || '복구가 완료되었습니다.', 'success', 'alert');
 					const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 					$modal.grid.getPagination().movePageTo(currentPage);
 				} else {
-					await gMessage('오류', resData.msg ?? '복구 중 오류가 발생했습니다.', 'error', 'alert');
+					await gMessage('오류', recoverData?.msg ?? '복구 중 오류가 발생했습니다.', 'error', 'alert');
 				}
 			} catch (err) {
 				swal.close();

@@ -36,6 +36,9 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.ObjectCannedACL;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -45,6 +48,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +69,8 @@ import java.util.stream.Collectors;
  *   - callbackItemDone : 완성 파일 스토리지 업로드 + item SUCCESS + 로그
  *   - callbackDone     : 배치 전체 완료 처리
  *   - resetBatches     : 비정상 종료 복구 (READY/PROGRESS → CANCELED + 성적서 IDLE)
+ *   - previewRecover   : 스마트 복구 미리보기 — 스토리지 파일 존재 여부 확인만 (DB 변경 없음)
+ *   - smartRecover     : 스마트 복구 실행 — 파일 있음 → SUCCESS, 파일 없음 → IDLE
  */
 @Service
 @Log4j2
@@ -816,7 +824,177 @@ public class ExcelWorkServiceImpl {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 9. callbackApprovalItemDone — 실무자결재 단건 완료 콜백
+    // 9. previewRecover — 스마트 복구 미리보기 (DB 변경 없음)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 복구 대상 성적서 목록에 대해 스토리지 파일 존재 여부를 확인하여
+     * "완료 처리될 목록(파일 있음)"과 "초기화될 목록(파일 없음)"을 미리 반환한다.
+     * DB 변경 없음 — 조회 전용.
+     *
+     * @param reportIds 대상 성적서 id 목록 (writeStatus READY/PROGRESS 인 것만 처리)
+     */
+    @Transactional(readOnly = true)
+    public ExcelWorkDTO.RecoverPreviewRes previewRecover(List<Long> reportIds) {
+        List<ExcelWorkDTO.RecoverItemInfo> successItems = new ArrayList<>();
+        List<ExcelWorkDTO.RecoverItemInfo> idleItems    = new ArrayList<>();
+
+        // 활성 배치(READY/PROGRESS)의 startDatetime을 경과 시간 표시용으로 조회
+        List<ReportJobBatch> activeBatches = batchRepository.findActiveByReportIds(reportIds);
+        Map<Long, LocalDateTime> reportStartMap = buildReportStartMap(activeBatches);
+
+        for (Long reportId : reportIds) {
+            Report report = reportRepository.findById(reportId).orElse(null);
+            if (report == null) continue;
+            // 이미 완료된 성적서는 복구 대상 아님
+            if (report.getWriteStatus() == AppStatus.SUCCESS) continue;
+
+            String objectKey = storageProps.getRootDir() + "/report/" + reportId + "/origin.xlsx";
+            boolean fileExists = headObject(objectKey) != null;
+
+            // 배치 시작 경과 분 (배치가 없거나 아직 READY면 null)
+            Long minutesAgo = null;
+            LocalDateTime startDt = reportStartMap.get(reportId);
+            if (startDt != null) {
+                minutesAgo = ChronoUnit.MINUTES.between(startDt, LocalDateTime.now());
+            }
+
+            var info = new ExcelWorkDTO.RecoverItemInfo(reportId, report.getReportNum(), minutesAgo);
+            if (fileExists) successItems.add(info);
+            else            idleItems.add(info);
+        }
+
+        return new ExcelWorkDTO.RecoverPreviewRes(successItems, idleItems);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10. smartRecover — 스마트 복구 실행
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 파일 존재 여부를 기준으로 각 성적서를 스마트하게 복구한다.
+     *
+     *   파일 있음 (origin.xlsx 스토리지에 존재):
+     *     callbackItemDone 재현 → writeStatus=SUCCESS, file_info 재등록
+     *   파일 없음:
+     *     writeStatus=IDLE, writeMemberId/writeDatetime 초기화, file_info soft-delete
+     *
+     * 배치 최종 상태: 전체 SUCCESS → SUCCESS / 전체 CANCELED → CANCELED / 혼합 → FAIL
+     *
+     * @param reportIds 복구 대상 성적서 id 목록
+     * @param memberId  요청자 id (로그·file_info createMemberId 기록용)
+     */
+    @Transactional
+    public ExcelWorkDTO.SmartRecoverRes smartRecover(List<Long> reportIds, Long memberId) {
+        List<String> successNums = new ArrayList<>();
+        List<String> idleNums    = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        // 활성 배치 목록 + reportId → batchId 매핑 (item 처리용)
+        List<ReportJobBatch> activeBatches = batchRepository.findActiveByReportIds(reportIds);
+        Map<Long, Long> reportToBatchId = buildReportToBatchIdMap(activeBatches);
+
+        for (Long reportId : reportIds) {
+            String objectKey = storageProps.getRootDir() + "/report/" + reportId + "/origin.xlsx";
+            HeadObjectResponse head = headObject(objectKey);
+            boolean fileExists = head != null;
+
+            // softDeleteByRefAndNames 는 clearAutomatically=true → PC 초기화.
+            // 이후 모든 엔티티 조작은 재로드 또는 명시적 save() 사용.
+            fileInfoRepository.softDeleteByRefAndNames(
+                    "report", reportId, List.of("origin"), YnType.n, now, memberId);
+
+            if (fileExists) {
+                // 파일 있음: file_info 재등록 (callbackItemDone 재현)
+                fileInfoRepository.save(FileInfo.builder()
+                        .refTableName("report").refTableId(reportId)
+                        .originName("origin.xlsx").name("origin").extension("xlsx")
+                        .fileSize(head.contentLength())
+                        .contentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .dir("report/" + reportId + "/").isVisible(YnType.y)
+                        .createDatetime(now).createMemberId(memberId)
+                        .build());
+            }
+
+            // PC 초기화 후 report 재로드
+            Report report = reportRepository.findById(reportId).orElse(null);
+            if (report == null) continue;
+            if (report.getWriteStatus() == AppStatus.SUCCESS) continue; // 이미 완료
+
+            if (fileExists) {
+                report.setWriteStatus(AppStatus.SUCCESS);
+                report.setWriteDatetime(now);
+                report.setWriteMemberId(memberId);
+                successNums.add(report.getReportNum());
+            } else {
+                report.setWriteStatus(AppStatus.IDLE);
+                report.setWriteDatetime(null);
+                report.setWriteMemberId(null);
+                idleNums.add(report.getReportNum());
+            }
+            reportRepository.save(report);
+
+            // item 처리
+            Long batchId = reportToBatchId.get(reportId);
+            if (batchId != null) {
+                JobItemStatus targetItemStatus = fileExists ? JobItemStatus.SUCCESS : JobItemStatus.CANCELED;
+                itemRepository.findByBatchId(batchId).stream()
+                        .filter(i -> i.getReportId().equals(reportId)
+                                  && i.getStatus() != JobItemStatus.SUCCESS)
+                        .forEach(item -> {
+                            item.setStatus(targetItemStatus);
+                            item.setEndDatetime(now);
+                            itemRepository.save(item);
+                        });
+            }
+        }
+
+        // 배치 최종 상태 결정
+        for (ReportJobBatch origBatch : activeBatches) {
+            ReportJobBatch batch = batchRepository.findById(origBatch.getId()).orElse(null);
+            if (batch == null) continue;
+
+            List<ReportJobItem> allItems = itemRepository.findByBatchId(batch.getId());
+            long successCnt  = allItems.stream().filter(i -> i.getStatus() == JobItemStatus.SUCCESS).count();
+            long canceledCnt = allItems.stream().filter(i -> i.getStatus() == JobItemStatus.CANCELED).count();
+
+            if (successCnt == allItems.size()) {
+                batch.setStatus(BatchStatus.SUCCESS);
+                batch.setSuccessCount((int) successCnt);
+            } else if (canceledCnt == allItems.size()) {
+                batch.setStatus(BatchStatus.CANCELED);
+            } else {
+                // 성공/취소 혼합
+                batch.setStatus(BatchStatus.FAIL);
+                batch.setSuccessCount((int) successCnt);
+                batch.setFailCount((int) (allItems.size() - successCnt - canceledCnt));
+            }
+            batch.setEndDatetime(now);
+            batchRepository.save(batch);
+        }
+
+        // 로그 기록
+        String logContent = String.format(
+                "스마트 복구 — 완료처리: %d건 [%s], 초기화: %d건 [%s]",
+                successNums.size(), String.join(", ", successNums),
+                idleNums.size(),    String.join(", ", idleNums));
+        logRepository.save(Log.builder()
+                .workerName("system")
+                .logContent(logContent)
+                .logType("u")
+                .refTable("report")
+                .refTableId(reportIds.isEmpty() ? 0L : reportIds.get(0))
+                .createDatetime(now)
+                .createMemberId(memberId)
+                .build());
+
+        log.info("스마트 복구 완료 — {}", logContent);
+        return new ExcelWorkDTO.SmartRecoverRes(
+                successNums.size(), idleNums.size(), successNums, idleNums);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 11. callbackApprovalItemDone — 실무자결재 단건 완료 콜백
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
@@ -1075,6 +1253,54 @@ public class ExcelWorkServiceImpl {
     // ─────────────────────────────────────────────────────────────────────────
     // 내부 유틸 메서드
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 스토리지 객체 존재 여부 및 메타데이터 확인.
+     * 파일이 없으면 null 반환, 있으면 HeadObjectResponse 반환.
+     */
+    private HeadObjectResponse headObject(String objectKey) {
+        try {
+            return ncloudS3Client.headObject(
+                    HeadObjectRequest.builder()
+                            .bucket(storageProps.getBucketName())
+                            .key(objectKey)
+                            .build()
+            );
+        } catch (NoSuchKeyException e) {
+            return null; // 파일 없음
+        } catch (S3Exception e) {
+            // 404 외의 S3 오류도 없음으로 처리 (파일 확인 실패 시 복구 차단 방지)
+            log.warn("headObject 실패 (없음으로 처리) — key: {}, status: {}", objectKey, e.statusCode());
+            return null;
+        }
+    }
+
+    /**
+     * 활성 배치 목록에서 reportId → batchId 매핑을 빌드한다.
+     * 하나의 배치에 여러 reportId가 포함될 수 있으므로 item을 순회해 매핑.
+     */
+    private Map<Long, Long> buildReportToBatchIdMap(List<ReportJobBatch> batches) {
+        Map<Long, Long> map = new HashMap<>();
+        for (ReportJobBatch batch : batches) {
+            itemRepository.findByBatchId(batch.getId())
+                    .forEach(item -> map.put(item.getReportId(), batch.getId()));
+        }
+        return map;
+    }
+
+    /**
+     * 활성 배치 목록에서 reportId → 배치 startDatetime 매핑을 빌드한다.
+     * 미리보기 시 배치 경과 시간 표시에 사용.
+     */
+    private Map<Long, LocalDateTime> buildReportStartMap(List<ReportJobBatch> batches) {
+        Map<Long, LocalDateTime> map = new HashMap<>();
+        for (ReportJobBatch batch : batches) {
+            if (batch.getStartDatetime() == null) continue; // READY 상태 (아직 시작 안 함)
+            itemRepository.findByBatchId(batch.getId())
+                    .forEach(item -> map.put(item.getReportId(), batch.getStartDatetime()));
+        }
+        return map;
+    }
 
     /** token 으로 배치 조회 — 존재하지 않으면 EntityNotFoundException */
     private ReportJobBatch findBatchByToken(String token) {

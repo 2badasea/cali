@@ -391,7 +391,7 @@ CREATE TABLE IF NOT EXISTS `report` (
   `tracestatement_info` json DEFAULT NULL COMMENT '소급성문구: (traceStatement, traceStatement2, traceStatement3, traceStatementEn, traceStatementEn2, traceStatementEn3)',
   `remark` varchar(250) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '품목 비고',
   `request` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci COMMENT '요청사항',
-  `report_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'WAIT' COMMENT '진행상태 (WAIT: 대기, REPAIR: 수리, IMPOSSIBLE: 불가, WORK_RETURN: 실무자반려, APPROV_RETURN: 기술책임자반려, REUPLOAD: 재업로드, COMPLETE: 완료, CANCEL: 취소)',
+  `report_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'NORMAL' COMMENT '진행상태 (NORMAL: 기본, REPAIR: 수리, IMPOSSIBLE: 불가, REJECTED: 반려, RESUBMITTED: 재업로드)',
   `status_remark` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci COMMENT '진행상태의 ''취소'', ''불가'', ''반려'' 사유',
   `write_member_id` bigint DEFAULT NULL COMMENT '성적서 작성자 id',
   `write_datetime` datetime DEFAULT NULL COMMENT '성적서 작성일시',
