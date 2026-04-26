@@ -15,14 +15,11 @@ $(function () {
 	// =====================================================================
 	function reportStatusLabel(value) {
 		const map = {
-			WAIT: '대기',
-			WORK_RETURN: '실무자반려',
-			APPROV_RETURN: '기술책임자반려',
-			REUPLOAD: '재업로드',
+			NORMAL: '기본',
 			REPAIR: '수리',
 			IMPOSSIBLE: '불가',
-			CANCEL: '취소',
-			COMPLETE: '완료',
+			REJECTED: '반려',
+			RESUBMITTED: '재업로드',
 		};
 		return map[value] ?? value ?? '';
 	}

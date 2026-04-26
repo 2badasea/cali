@@ -50,21 +50,18 @@
                         <div class="input-group input-group-sm" style="width: auto;">
                             <select class="form-control form-control-sm reportStatusFilter" style="width: 115px;">
                                 <option value="" selected>진행상태</option>
-                                <option value="WAIT">대기</option>
-                                <option value="WORK_RETURN">실무자반려</option>
-                                <option value="APPROV_RETURN">기술책임자반려</option>
-                                <option value="REUPLOAD">재업로드</option>
+                                <option value="NORMAL">기본</option>
                                 <option value="REPAIR">수리</option>
                                 <option value="IMPOSSIBLE">불가</option>
-                                <option value="CANCEL">취소</option>
-                                <option value="COMPLETE">완료</option>
+                                <option value="REJECTED">반려</option>
+                                <option value="RESUBMITTED">재업로드</option>
                             </select>
                         </div>
 
-                        <!-- 검색필터2: 결재상태 (work_status), 기본 IDLE -->
+                        <!-- 검색필터2: 결재상태 (work_status), 기본 "" → IDLE+READY+PROGRESS 표시 (FAIL/SUCCESS 제외) -->
                         <div class="input-group input-group-sm" style="width: auto;">
                             <select class="form-control form-control-sm workStatusFilter" style="width: 95px;">
-                                <option value="IDLE" selected>결재상태</option>
+                                <option value="" selected>결재상태</option>
                                 <option value="READY">결재대기</option>
                                 <option value="PROGRESS">결재진행중</option>
                                 <option value="FAIL">결재실패</option>

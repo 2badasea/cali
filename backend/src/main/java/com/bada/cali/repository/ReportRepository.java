@@ -120,10 +120,8 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			    		)
 			    	)
 			    	AND (:statusType IS NULL OR (
-			    			(:statusType = 'cancel' AND r.reportStatus = 'CANCEL')
-			    			OR  (:statusType = 'impossible' AND r.reportStatus = 'IMPOSSIBLE')
-			    			OR  (:statusType = 'return' AND (r.reportStatus = 'WORK_RETURN' OR r.reportStatus = 'APPROV_RETURN')
-			    			)
+			    			(:statusType = 'impossible' AND r.reportStatus = 'IMPOSSIBLE')
+			    			OR  (:statusType = 'return' AND r.reportStatus = 'REJECTED')
 			    			OR  (:statusType = 'wait' AND r.workDatetime IS NULL AND r.approvalDatetime IS NULL)
 			    			OR (:statusType = 'progress' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NULL)
 			    			OR (:statusType = 'success' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NOT NULL)
@@ -184,9 +182,8 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 				)
 			)
 			AND (:statusType IS NULL OR (
-				(:statusType = 'cancel' AND r.reportStatus = 'CANCEL')
-				OR (:statusType = 'impossible' AND r.reportStatus = 'IMPOSSIBLE')
-				OR (:statusType = 'return' AND (r.reportStatus = 'WORK_RETURN' OR r.reportStatus = 'APPROV_RETURN'))
+				(:statusType = 'impossible' AND r.reportStatus = 'IMPOSSIBLE')
+				OR (:statusType = 'return' AND r.reportStatus = 'REJECTED')
 				OR (:statusType = 'wait' AND r.workDatetime IS NULL AND r.approvalDatetime IS NULL)
 				OR (:statusType = 'progress' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NULL)
 				OR (:statusType = 'success' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NOT NULL)
@@ -383,7 +380,10 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.report_type       = 'SELF'
 			  AND r.parent_scale_id   IS NULL
 			  AND (:reportStatus IS NULL OR r.report_status  = :reportStatus)
-			  AND (:workStatus   IS NULL OR r.work_status    = :workStatus)
+			  AND (
+			      (:workStatus IS NOT NULL AND r.work_status = :workStatus)
+			      OR (:workStatus IS NULL AND r.work_status NOT IN ('FAIL', 'SUCCESS'))
+			  )
 			  AND (:writeStatus  IS NULL OR r.write_status   = :writeStatus)
 			  AND (:orderType    IS NULL OR r.order_type     = :orderType)
 			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
@@ -450,7 +450,10 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.report_type       = 'SELF'
 			  AND r.parent_scale_id   IS NULL
 			  AND (:reportStatus IS NULL OR r.report_status  = :reportStatus)
-			  AND (:workStatus   IS NULL OR r.work_status    = :workStatus)
+			  AND (
+			      (:workStatus IS NOT NULL AND r.work_status = :workStatus)
+			      OR (:workStatus IS NULL AND r.work_status NOT IN ('FAIL', 'SUCCESS'))
+			  )
 			  AND (:writeStatus  IS NULL OR r.write_status   = :writeStatus)
 			  AND (:orderType    IS NULL OR r.order_type     = :orderType)
 			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
