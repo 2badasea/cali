@@ -92,6 +92,19 @@ public class CaliController {
 		return "cali/reportUpload";
 	}
 
+	// 기술책임자결재 페이지 이동
+	@GetMapping(value = "/managerApproval")
+	public String managerApproval(Model model) {
+		model.addAttribute("title", "기술책임자결재");
+		return "cali/managerApproval";
+	}
+
+	// 반려사유 입력 모달 (managerApproval 페이지에서 gModal로 호출)
+	@PostMapping(value = "/reportReject")
+	public String reportReject() {
+		return "cali/reportReject";
+	}
+
 	// 출장일정 페이지 이동
 	@GetMapping(value = "/businessTrip")
 	public String businessTrip(Model model) {

@@ -164,6 +164,29 @@ public interface FileInfoRepository extends JpaRepository<FileInfo, Long> {
 	);
 
 	/**
+	 * 특정 ref에 해당하는 file_info 전체 소프트삭제.
+	 * 수리/불가 처리 시 origin·signed 구분 없이 모든 파일을 논리 삭제할 때 사용한다.
+	 */
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+        update FileInfo f
+           set f.isVisible = :isVisible,
+               f.deleteDatetime = :now,
+               f.deleteMemberId = :userId
+         where f.refTableName = :refTableName
+           and f.refTableId = :refTableId
+           and f.isVisible = 'y'
+    """)
+	int softDeleteAllByRef(
+			@Param("refTableName") String refTableName,
+			@Param("refTableId") Long refTableId,
+			@Param("isVisible") YnType isVisible,
+			@Param("now") LocalDateTime now,
+			@Param("userId") Long userId
+	);
+
+	/**
 	 * 특정 ref + name 목록에 해당하는 file_info만 소프트삭제.
 	 * WORK_APPROVAL 콜백 SUCCESS 시 signed_xlsx / signed_pdf 파일만 삭제하고
 	 * origin 파일 file_info는 보존하기 위해 사용한다.
@@ -183,6 +206,31 @@ public interface FileInfoRepository extends JpaRepository<FileInfo, Long> {
 	int softDeleteByRefAndNames(
 			@Param("refTableName") String refTableName,
 			@Param("refTableId") Long refTableId,
+			@Param("names") java.util.List<String> names,
+			@Param("isVisible") YnType isVisible,
+			@Param("now") LocalDateTime now,
+			@Param("userId") Long userId
+	);
+
+	/**
+	 * 여러 refTableId + name 목록에 해당하는 file_info 일괄 소프트삭제.
+	 * 기술책임자결재 반려 시 signed_xlsx / signed_pdf 파일만 다건 삭제할 때 사용한다.
+	 */
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+        update FileInfo f
+           set f.isVisible = :isVisible,
+               f.deleteDatetime = :now,
+               f.deleteMemberId = :userId
+         where f.refTableName = :refTableName
+           and f.refTableId in :refTableIds
+           and f.name in :names
+           and f.isVisible = 'y'
+    """)
+	int softDeleteByRefTableIdsAndNames(
+			@Param("refTableName") String refTableName,
+			@Param("refTableIds") Collection<Long> refTableIds,
 			@Param("names") java.util.List<String> names,
 			@Param("isVisible") YnType isVisible,
 			@Param("now") LocalDateTime now,

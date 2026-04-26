@@ -35,6 +35,7 @@ public class ReportUploadServiceImpl {
 
     private static final String CT_XLSX =
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    private static final String CT_PDF  = "application/pdf";
 
     private final ReportRepository      reportRepository;
     private final FileInfoRepository    fileInfoRepository;
@@ -88,6 +89,17 @@ public class ReportUploadServiceImpl {
             if (report.getReportType() != ReportType.SELF) {
                 invalid.add(new ReportJobBatchDTO.InvalidItem(report.getId(), reportNum,
                         "자체성적서(SELF)만 업로드 가능합니다."));
+                continue;
+            }
+
+            // manager 모드: 기술책임자결재 완료 성적서에 대한 signed 파일 교체
+            if ("manager".equals(mode)) {
+                if (report.getApprovalStatus() != AppStatus.SUCCESS) {
+                    invalid.add(new ReportJobBatchDTO.InvalidItem(report.getId(), reportNum,
+                            "기술책임자결재가 완료된 성적서만 파일 교체가 가능합니다."));
+                    continue;
+                }
+                valid.add(new ReportJobBatchDTO.ValidateItem(report.getId(), reportNum));
                 continue;
             }
 
@@ -239,6 +251,106 @@ public class ReportUploadServiceImpl {
             // 이미 업로드된 파일은 롤백하지 않음 (DB 트랜잭션 롤백으로 file_info 원복)
             // 스토리지 파일은 재업로드 시 덮어쓰기로 처리됨
             log.error("origin 파일 업로드 중 오류 발생", e);
+            throw new RuntimeException("파일 업로드 중 오류가 발생했습니다: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * signed 파일(signed.xlsx / signed.pdf) 교체 업로드.
+     *
+     * 기술책임자결재 완료(approval_status=SUCCESS) 성적서에 대해 signed 파일을 교체한다.
+     * 파일명(확장자 제거) = 성적서번호 기반으로 대상 성적서를 특정하며,
+     * xlsx → signed.xlsx, pdf → signed.pdf 로 각각 업로드한다.
+     * 성적서 상태 필드 변경 없음 (파일 교체만).
+     *
+     * @param files      업로드할 MultipartFile 목록 (파일명 = 성적서번호.xlsx 또는 성적서번호.pdf)
+     * @param reportIds  업로드 대상 성적서 id 목록 (validate 결과 기반)
+     * @param userId     요청자 member id
+     */
+    @Transactional
+    public void replaceSignedFiles(List<MultipartFile> files, List<Long> reportIds, Long userId) {
+        List<Report> reports = reportRepository.findAllById(reportIds);
+        if (reports.size() != reportIds.size()) {
+            throw new EntityNotFoundException("일부 성적서를 찾을 수 없습니다.");
+        }
+
+        Map<String, Long> numToId = reports.stream()
+                .collect(Collectors.toMap(Report::getReportNum, Report::getId));
+
+        String bucket  = storageProps.getBucketName();
+        String rootDir = storageProps.getRootDir();
+        LocalDateTime now = LocalDateTime.now();
+
+        try {
+            for (MultipartFile file : files) {
+                if (file == null || file.isEmpty()) continue;
+
+                String originalFilename = file.getOriginalFilename();
+                if (originalFilename == null) continue;
+                originalFilename = originalFilename
+                        .substring(originalFilename.lastIndexOf("\\") + 1)
+                        .substring(originalFilename.lastIndexOf("/") + 1);
+
+                int dotIdx = originalFilename.lastIndexOf('.');
+                String reportNum = dotIdx > 0 ? originalFilename.substring(0, dotIdx) : originalFilename;
+                String ext       = dotIdx > 0 ? originalFilename.substring(dotIdx + 1).toLowerCase() : "";
+
+                Long reportId = numToId.get(reportNum);
+                if (reportId == null) {
+                    log.warn("파일명 '{}' 에 해당하는 성적서를 찾을 수 없어 건너뜁니다.", reportNum);
+                    continue;
+                }
+
+                boolean isXlsx = "xlsx".equals(ext) || "xls".equals(ext);
+                boolean isPdf  = "pdf".equals(ext);
+                if (!isXlsx && !isPdf) {
+                    log.warn("지원하지 않는 파일 형식 — 건너뜁니다: {}", originalFilename);
+                    continue;
+                }
+
+                String storedName   = isXlsx ? "signed.xlsx"  : "signed.pdf";
+                String fileInfoName = isXlsx ? "signed_xlsx"  : "signed_pdf";
+                String contentType  = isXlsx ? CT_XLSX        : CT_PDF;
+                String storedExt    = isXlsx ? "xlsx"         : "pdf";
+
+                // 기존 signed file_info 소프트삭제
+                fileInfoRepository.softDeleteByRefAndNames(
+                        "report", reportId,
+                        List.of(fileInfoName),
+                        YnType.n, now, userId
+                );
+
+                // 스토리지 업로드 (고정 경로: {rootDir}/report/{reportId}/signed.xlsx|pdf)
+                String objectKey = rootDir + "/report/" + reportId + "/" + storedName;
+                PutObjectRequest putReq = PutObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(objectKey)
+                        .acl(ObjectCannedACL.PUBLIC_READ)
+                        .contentType(contentType)
+                        .build();
+
+                try (InputStream is = file.getInputStream()) {
+                    ncloudS3Client.putObject(putReq, RequestBody.fromInputStream(is, file.getSize()));
+                }
+                log.info("signed 파일 교체 완료 — reportId: {}, key: {}", reportId, objectKey);
+
+                // 신규 file_info 등록
+                fileInfoRepository.save(FileInfo.builder()
+                        .refTableName("report")
+                        .refTableId(reportId)
+                        .originName(storedName)
+                        .name(fileInfoName)
+                        .extension(storedExt)
+                        .fileSize(file.getSize())
+                        .contentType(contentType)
+                        .dir("report/" + reportId + "/")
+                        .isVisible(YnType.y)
+                        .createDatetime(now)
+                        .createMemberId(userId)
+                        .build());
+            }
+        } catch (Exception e) {
+            log.error("signed 파일 업로드 중 오류 발생", e);
             throw new RuntimeException("파일 업로드 중 오류가 발생했습니다: " + e.getMessage(), e);
         }
     }

@@ -64,6 +64,44 @@ public class ReportUploadController {
     }
 
     /**
+     * signed 파일(xlsx/pdf) 교체 업로드.
+     *
+     * 기술책임자결재 완료(approval_status=SUCCESS) 성적서에 대해 signed.xlsx 또는 signed.pdf를 교체한다.
+     * 성적서 상태 변경 없음 (파일 교체만).
+     */
+    @Operation(
+            summary = "signed 파일(xlsx/pdf) 교체 업로드",
+            description = "기술책임자결재 완료(approval_status=SUCCESS) 성적서에 대해 " +
+                    "signed.xlsx 또는 signed.pdf를 스토리지에 덮어쓰고 file_info를 교체. " +
+                    "성적서 상태 변경 없음."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "업로드 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 성적서 포함",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류 또는 스토리지 업로드 실패",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/signed")
+    public ResponseEntity<ResMessage<Void>> uploadSigned(
+            @Parameter(description = "업로드할 xlsx/pdf 파일 목록 (파일명 = 성적서번호.xlsx 또는 성적서번호.pdf)")
+            @RequestParam("files") List<MultipartFile> files,
+            @Parameter(description = "validate API에서 반환된 valid 성적서 id 목록", example = "[1, 2, 3]")
+            @RequestParam("reportIds") List<Long> reportIds,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        if (files == null || files.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(new ResMessage<>(0, "업로드할 파일을 선택해야 합니다.", null));
+        }
+        uploadService.replaceSignedFiles(files, reportIds, user.getId());
+        return ResponseEntity.ok(new ResMessage<>(1,
+                String.format("파일 교체가 완료되었습니다. (%d건)", files.size()), null));
+    }
+
+    /**
      * 성적서 원본 파일(origin.xlsx) 교체 업로드.
      *
      * 파일명(확장자 제거) = 성적서번호로 대상 성적서를 특정하여 스토리지에 origin.xlsx를 덮어쓴다.

@@ -43,7 +43,9 @@
       "Bash(JAVA_HOME=/c/Users/gnjqt/.jdks/corretto-17.0.18 ./gradlew compileJava)",
       "Bash(claude config:*)",
       "Bash(git checkout:*)",
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(git *)",
+      "Bash(JAVA_HOME=\"/c/Users/gnjqt/.jdks/corretto-17.0.18\" cd C:/BadaDev/cali/backend)"
     ]
   }
 }

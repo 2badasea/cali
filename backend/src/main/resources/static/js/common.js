@@ -1681,14 +1681,11 @@ function checkPwd(str = '') {
  */
 function reportStatusLabel(status) {
 	const map = {
-		WAIT: '대기',
+		NORMAL: '기본',
 		REPAIR: '수리',
 		IMPOSSIBLE: '불가',
-		WORK_RETURN: '반려(실무)',
-		REUPLOAD: '재업로드',
-		APPROV_RETURN: '반려(기책)',
-		COMPLETE: '완료',
-		CANCEL: '취소',
+		REJECTED: '반려',
+		RESUBMITTED: '재업로드',
 	};
 	return map[status] ?? status ?? '';
 }

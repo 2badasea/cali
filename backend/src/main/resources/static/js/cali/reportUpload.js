@@ -14,6 +14,8 @@ $(function () {
 
 	// 현재 선택된 File 객체 배열
 	let selectedFiles = [];
+	// 모달 호출 타입: 'work'(기본, 원본 xlsx 업로드) | 'manager'(기술책임자용, signed xlsx/pdf 교체)
+	let uploadType = 'work';
 
 	// =====================================================================
 	// init_modal: 모달 파라미터 수신 후 초기화
@@ -24,7 +26,9 @@ $(function () {
 		console.log('🚀 ~ $modal.param:', $modal.param);
 		// 모달이 재사용될 때 이전 선택 파일 초기화
 		selectedFiles = [];
+		uploadType = param.type ?? 'work';
 		renderFileList([]);
+		applyUploadTypeUI();
 	};
 
 	// =====================================================================
@@ -36,9 +40,11 @@ $(function () {
 
 		$list.empty();
 		files.forEach((f) => {
+			const isPdf = f.name.toLowerCase().endsWith('.pdf');
+			const iconClass = isPdf ? 'bi-file-earmark-pdf' : 'bi-file-earmark-excel';
 			$list.append(
 				`<li>
-					<i class="bi bi-file-earmark-excel"></i>
+					<i class="bi ${iconClass}"></i>
 					<span>${f.name}</span>
 				</li>`,
 			);
@@ -55,11 +61,17 @@ $(function () {
 	function applyFiles(files) {
 		const valid = Array.from(files).filter((f) => {
 			const ext = f.name.split('.').pop().toLowerCase();
+			if (uploadType === 'manager') {
+				return ['xlsx', 'xls', 'pdf'].includes(ext);
+			}
 			return ext === 'xlsx' || ext === 'xls';
 		});
 
 		if (valid.length < files.length) {
-			gToast('엑셀 파일(.xlsx, .xls)만 업로드 가능합니다. 다른 형식의 파일은 제외되었습니다.', 'warning');
+			const msg = uploadType === 'manager'
+				? '엑셀(.xlsx, .xls) 또는 PDF(.pdf) 파일만 업로드 가능합니다. 다른 형식의 파일은 제외되었습니다.'
+				: '엑셀 파일(.xlsx, .xls)만 업로드 가능합니다. 다른 형식의 파일은 제외되었습니다.';
+			gToast(msg, 'warning');
 		}
 
 		if (valid.length === 0) {
@@ -70,6 +82,44 @@ $(function () {
 
 		selectedFiles = valid;
 		renderFileList(valid);
+	}
+
+	// =====================================================================
+	// uploadType에 따라 드롭존 안내문구 / 파일 input accept / 버튼 상태 변경
+	// =====================================================================
+	function applyUploadTypeUI() {
+		if (uploadType === 'manager') {
+			$modal.find('.upload-hint').text('엑셀/PDF 파일을 드래그하거나 버튼을 클릭하세요');
+			$modal.find('.upload-hint-sub').text('.xlsx, .xls, .pdf 파일을 업로드 가능합니다');
+			$fileInput.attr('accept', '.xlsx,.xls,.pdf');
+			$modal.find('.btnUploadApproval').hide();
+			$modal.find('.btnUploadOnly').html('<i class="bi bi-upload me-1"></i> 파일 교체');
+		} else {
+			$modal.find('.upload-hint').text('엑셀 파일을 드래그하거나 버튼을 클릭하세요');
+			$modal.find('.upload-hint-sub').text('.xlsx, .xls 파일만 업로드 가능합니다');
+			$fileInput.attr('accept', '.xlsx,.xls');
+			$modal.find('.btnUploadApproval').show();
+			$modal.find('.btnUploadOnly').html('<i class="bi bi-upload me-1"></i> 업로드');
+		}
+	}
+
+	// =====================================================================
+	// signed 파일(xlsx/pdf) 교체 업로드 (type='manager' 전용)
+	// POST /api/report/upload/signed (multipart)
+	// =====================================================================
+	async function uploadSignedFiles(files, reportIds) {
+		const formData = new FormData();
+		files.forEach((f) => formData.append('files', f));
+		reportIds.forEach((id) => formData.append('reportIds', id));
+
+		const res = await fetch('/api/report/upload/signed', {
+			method: 'POST',
+			body: formData,
+		});
+		if (!res.ok) throw res;
+		const resData = await res.json();
+		if (!resData || resData.code <= 0) throw new Error(resData.msg ?? '파일 업로드 중 오류가 발생했습니다.');
+		return resData.data;
 	}
 
 	// =====================================================================
@@ -252,7 +302,7 @@ $(function () {
 	});
 
 	// =====================================================================
-	// 업로드 버튼: 원본 파일 교체만 수행
+	// 업로드 버튼: 원본 파일 교체(work) 또는 signed 파일 교체(manager)
 	// =====================================================================
 	$modal.on('click', '.btnUploadOnly', async function () {
 		if (selectedFiles.length === 0) {
@@ -260,11 +310,15 @@ $(function () {
 			return;
 		}
 
+		const isManager = uploadType === 'manager';
+		const mode = isManager ? 'manager' : 'upload';
+		const proceedLabel = isManager ? '파일 교체' : '업로드';
+
 		// 1. 유효성 검증
 		let validateResult;
 		try {
 			gLoadingMessage('유효성 검증 중...');
-			validateResult = await validateUploadFiles(selectedFiles, 'upload');
+			validateResult = await validateUploadFiles(selectedFiles, mode);
 			swal.close();
 		} catch (err) {
 			swal.close();
@@ -275,17 +329,21 @@ $(function () {
 		const { valid, invalid } = validateResult;
 
 		// 2. 결과 표시 + 진행 여부 확인
-		const proceed = await confirmWithValidationResult(valid, invalid, '업로드');
+		const proceed = await confirmWithValidationResult(valid, invalid, proceedLabel);
 		if (!proceed) return;
 
-		// 3. 유효 파일만 origin 업로드
+		// 3. 유효 파일만 업로드 (타입에 따라 엔드포인트 분기)
 		const validNums = new Set(valid.map((v) => v.reportNum));
 		const validFiles = selectedFiles.filter((f) => validNums.has(f.name.replace(/\.[^/.]+$/, '')));
 		const reportIds = valid.map((v) => v.id);
 
 		try {
-			gLoadingMessage('원본 파일 업로드 중...');
-			await uploadOriginFiles(validFiles, reportIds);
+			gLoadingMessage(`${proceedLabel} 중...`);
+			if (isManager) {
+				await uploadSignedFiles(validFiles, reportIds);
+			} else {
+				await uploadOriginFiles(validFiles, reportIds);
+			}
 			swal.close();
 		} catch (err) {
 			swal.close();
@@ -296,7 +354,11 @@ $(function () {
 		selectedFiles = [];
 		renderFileList([]);
 
-		await gMessage('업로드 완료', `${reportIds.length}건의 원본 파일이 교체되었습니다.`, 'success', 'alert');
+		const completeTitle = isManager ? '파일 교체 완료' : '업로드 완료';
+		const completeMsg = isManager
+			? `${reportIds.length}건의 signed 파일이 교체되었습니다.`
+			: `${reportIds.length}건의 원본 파일이 교체되었습니다.`;
+		await gMessage(completeTitle, completeMsg, 'success', 'alert');
 	});
 
 	// =====================================================================

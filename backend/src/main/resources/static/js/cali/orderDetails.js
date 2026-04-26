@@ -166,7 +166,7 @@
 				// 자체
 				if (reportType === 'SELF') {
 					// 기술책임자 완료 및 결재 진행중인 건에 건은 '저장' 버튼 비활성화 (접수상세, 접수, 실무자, 기책 페이지별 구분)
-					const isModifiable = row.approvalDatetime || row.reportStatus === 'COMPLETE' || row.approvalStatus !== 'IDLE' ? false : true;
+					const isModifiable = row.approvalDatetime || row.approvalStatus !== 'IDLE' ? false : true;
 					const resModal = await gModal(
 						'/cali/reportModify',
 						{
@@ -178,10 +178,7 @@
 							show_close_button: true,
 							show_confirm_button: isModifiable,
 							confirm_button_text: '저장',
-							// 성적서작성 버튼: footer 왼쪽 끝에 배치
-							custom_btn_html_arr: [
-								'<button type="button" class="btn btn-primary btn-sm modal-btn-write-report mr-auto"><i class="bi bi-pencil-square"></i> 성적서작성</button>',
-							],
+							// 성적서작성·수리/불가/초기화 버튼은 reportModify.js init_modal에서 동적 삽입됨
 						},
 					);
 
@@ -286,9 +283,9 @@
 					}
 					// 대행
 					else {
-						if (row.reportStatus === 'COMPLETE') {
+						if (row.approvalStatus === 'SUCCESS') {
 							isFlag = false;
-							gToast('이미 완료된 대행 건이 존재합니다.', 'warning');
+							gToast('이미 결재가 완료된 대행 건이 존재합니다.', 'warning');
 							return false;
 						} else {
 							// if (validateInfo['AGCY'] != undefined && Array.isArray(validateInfo['AGCY'])) {

@@ -508,15 +508,17 @@ class ReportFileDownloadRenderer {
 		}
 
 		const fileTypeMap = {
-			originFileId: 'origin',
-			excelFileId:  'signed_xlsx',
-			pdfFileId:    'signed_pdf',
+			originFileId:    'origin',
+			excelFileId:     'signed_xlsx',
+			pdfFileId:       'signed_pdf',
+			signedXlsxFileId: 'signed_xlsx',  // managerApproval 그리드용
+			signedPdfFileId:  'signed_pdf',   // managerApproval 그리드용
 		};
 		const fileType  = fileTypeMap[colName] ?? 'origin';
 		const reportId  = props.grid.getRow(props.rowKey).id;
 		const reportNum = props.grid.getRow(props.rowKey).reportNum ?? '';
 
-		const isPdf  = colName === 'pdfFileId';
+		const isPdf  = colName === 'pdfFileId' || colName === 'signedPdfFileId';
 		const btnCls = isPdf ? 'btn-danger' : 'btn-success';
 		const icon   = isPdf ? 'bi-file-earmark-pdf-fill' : 'bi-file-earmark-excel-fill';
 
@@ -557,6 +559,115 @@ class WriteStatusCellRenderer {
 			FAIL:     '<span class="badge bg-danger">실패</span>',
 		};
 		this.el.innerHTML = map[v] ?? `<span class="badge bg-secondary">${v}</span>`;
+	}
+
+	getElement() { return this.el; }
+}
+
+// 실무자결재·기술책임자결재: 수리/불가/초기화 상태변경 버튼 렌더러
+// - workStatus=SUCCESS(실무자결재 완료)이면 수리·불가 버튼 disabled
+// - reportStatus=REPAIR이면 수리 버튼 btn-info(하늘색), IMPOSSIBLE이면 불가 버튼 btn-danger(빨간색)
+// - 클릭 이벤트는 부모 페이지에서 위임(e.stopPropagation으로 그리드 행 클릭 차단)
+class StatusChangeCellRenderer {
+	constructor(props) {
+		this.el = document.createElement('div');
+		this.el.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:2px; padding:2px 0; width:100%;';
+		this.render(props);
+	}
+
+	render(props) {
+		const row = props.grid.getRow(props.rowKey);
+		if (!row) { this.el.innerHTML = ''; return; }
+
+		const { reportStatus, workStatus, id: reportId } = row;
+		const isApproved    = workStatus === 'SUCCESS';
+		const repairCls     = reportStatus === 'REPAIR'     ? 'btn-info'    : 'btn-secondary';
+		const impossibleCls = reportStatus === 'IMPOSSIBLE' ? 'btn-danger'  : 'btn-secondary';
+		const disabledAttr  = isApproved ? ' disabled' : '';
+
+		this.el.innerHTML =
+			`<button type="button" class="btn btn-sm ${repairCls} btn-status-repair" ` +
+				`data-id="${reportId}"${disabledAttr} style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">수리</button>` +
+			`<button type="button" class="btn btn-sm ${impossibleCls} btn-status-impossible" ` +
+				`data-id="${reportId}"${disabledAttr} style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">불가</button>` +
+			`<button type="button" class="btn btn-sm btn-warning btn-status-reset" ` +
+				`data-id="${reportId}" style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">초기화</button>`;
+
+		// 그리드 행 클릭 이벤트 전파 차단 (행 선택·모달 오픈 방지)
+		this.el.querySelectorAll('button').forEach(btn =>
+			btn.addEventListener('click', e => e.stopPropagation())
+		);
+	}
+
+	getElement() { return this.el; }
+}
+
+// 기술책임자결재: '결재자' 열 렌더러
+// - approval_status !== 'SUCCESS': '반려' 버튼(btn-danger) + '확인' 버튼(btn-primary) 표시
+// - approval_status === 'SUCCESS': 기술책임자 이름 + (개행) 결재일시 텍스트 표시
+class ManagerApprovalCellRenderer {
+	constructor(props) {
+		this.el = document.createElement('div');
+		this.el.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:2px; padding:2px 0; width:100%;';
+		this.render(props);
+	}
+
+	render(props) {
+		const row = props.grid.getRow(props.rowKey);
+		if (!row) { this.el.innerHTML = ''; return; }
+
+		const { approvalStatus, approvalMemberName, approvalDatetime, id: reportId } = row;
+
+		if (approvalStatus === 'SUCCESS') {
+			// 결재 완료: 이름 + 결재일시 표시
+			const dateStr = approvalDatetime
+				? String(approvalDatetime).replace('T', ' ').substring(0, 16)
+				: '';
+			this.el.innerHTML =
+				`<span style="font-size:12px; font-weight:500;">${approvalMemberName ?? ''}</span>` +
+				`<span style="font-size:11px; color:#666;">${dateStr}</span>`;
+		} else {
+			// 미결재: 반려 + 확인 버튼
+			this.el.innerHTML =
+				`<button type="button" class="btn btn-sm btn-danger btn-manager-reject" ` +
+					`data-id="${reportId}" style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">반려</button>` +
+				`<button type="button" class="btn btn-sm btn-primary btn-manager-approve" ` +
+					`data-id="${reportId}" style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">확인</button>`;
+
+			this.el.querySelectorAll('button').forEach(btn =>
+				btn.addEventListener('click', e => e.stopPropagation())
+			);
+		}
+	}
+
+	getElement() { return this.el; }
+}
+
+// 기술책임자결재: '취소' 열 렌더러
+// - approval_status === 'SUCCESS'인 행만 '취소' 버튼(btn-secondary) 표시
+// - 그 외: 빈 셀
+class ManagerCancelCellRenderer {
+	constructor(props) {
+		this.el = document.createElement('div');
+		this.el.style.cssText = 'display:flex; align-items:center; justify-content:center; width:100%; height:100%; min-height:28px;';
+		this.render(props);
+	}
+
+	render(props) {
+		const row = props.grid.getRow(props.rowKey);
+		if (!row || row.approvalStatus !== 'SUCCESS') {
+			this.el.innerHTML = '';
+			return;
+		}
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'btn btn-sm btn-secondary btn-manager-cancel';
+		btn.dataset.id = row.id;
+		btn.style.cssText = 'font-size:11px; padding:1px 8px; line-height:1.4;';
+		btn.textContent = '취소';
+		btn.addEventListener('click', e => e.stopPropagation());
+		this.el.innerHTML = '';
+		this.el.appendChild(btn);
 	}
 
 	getElement() { return this.el; }

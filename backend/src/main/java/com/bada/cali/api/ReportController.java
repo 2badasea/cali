@@ -216,5 +216,24 @@ public class ReportController {
 		return ResponseEntity.ok(new ResMessage<>(1, "검증 완료", res));
 	}
 
+	@Operation(summary = "성적서 진행상태 변경",
+			description = "수리(REPAIR) / 불가(IMPOSSIBLE) / 초기화(NORMAL) 처리. " +
+					"수리·불가 처리 시 성적서작성 및 결재 관련 데이터와 첨부파일을 모두 초기화함. " +
+					"실무자 결재가 완료된 성적서(work_status=SUCCESS)는 수리·불가 처리 불가.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "상태 변경 성공"),
+			@ApiResponse(responseCode = "400", description = "요청 파라미터 오류 또는 검증 실패"),
+			@ApiResponse(responseCode = "404", description = "성적서를 찾을 수 없음"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PatchMapping("/updateStatus/{id}")
+	public ResponseEntity<ResMessage<Void>> updateReportStatus(
+			@PathVariable Long id,
+			@Valid @RequestBody ReportDTO.UpdateStatusReq req,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		return ResponseEntity.ok(reportService.updateReportStatus(id, req.getNewStatus(), user));
+	}
+
 
 }

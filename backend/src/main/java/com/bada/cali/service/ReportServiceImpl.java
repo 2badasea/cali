@@ -342,12 +342,11 @@ public class ReportServiceImpl {
 				
 				// 자체/대행 분리 검증
 				if (reportType == ReportType.AGCY) {
-					// 대행이 경우, 완료유무만 확인한다.
+					// 대행의 경우, 기술책임자 결재 완료 여부만 확인한다.
 					for (Report report : reportList) {
-						ReportStatus reportStatus = report.getReportStatus();
-						if (reportStatus == ReportStatus.COMPLETE) {
+						if (report.getApprovalStatus() == AppStatus.SUCCESS) {
 							code = -1;
-							message = String.format("완료된 대행성적서는 삭제가 불가능합니다. (성적서번호: %s)", report.getReportNum());
+							message = String.format("결재가 완료된 대행성적서는 삭제가 불가능합니다. (성적서번호: %s)", report.getReportNum());
 							return new ResMessage<>(code, message, null);
 						}
 					}
@@ -985,6 +984,63 @@ public class ReportServiceImpl {
 	/** null이거나 공백인 경우 false 반환 */
 	private boolean hasValue(String val) {
 		return val != null && !val.isBlank();
+	}
+
+	/**
+	 * 성적서 진행상태 변경 (수리/불가/초기화)
+	 *
+	 * REPAIR·IMPOSSIBLE 처리 시: write/work/approval 상태·일시 초기화 + 파일 전체 소프트삭제
+	 * NORMAL 처리 시: 상태만 NORMAL로 변경 (초기화)
+	 * 실무자 결재 완료(workStatus=SUCCESS) 상태이면 REPAIR·IMPOSSIBLE 불가
+	 */
+	@Transactional
+	public ResMessage<Void> updateReportStatus(Long reportId, String newStatus, CustomUserDetails user) {
+		Report report = reportRepository.findById(reportId)
+				.orElseThrow(() -> new EntityNotFoundException("성적서를 찾을 수 없습니다."));
+
+		// 유효성 검증
+		ReportStatus targetStatus;
+		try {
+			targetStatus = ReportStatus.valueOf(newStatus);
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("유효하지 않은 상태값입니다: " + newStatus);
+		}
+
+		// 실무자 결재 완료 상태이면 수리/불가 불가
+		if ((targetStatus == ReportStatus.REPAIR || targetStatus == ReportStatus.IMPOSSIBLE)
+				&& report.getWorkStatus() == AppStatus.SUCCESS) {
+			return new ResMessage<>(-1, "실무자 결재가 완료된 성적서는 수리/불가 처리가 불가능합니다.", null);
+		}
+
+		LocalDateTime now = LocalDateTime.now();
+		Long userId = user.getId();
+
+		// 수리·불가 처리 시 관련 상태 및 파일 초기화
+		if (targetStatus == ReportStatus.REPAIR || targetStatus == ReportStatus.IMPOSSIBLE) {
+			report.setWriteStatus(AppStatus.IDLE);
+			report.setWriteDatetime(null);
+			report.setWorkStatus(AppStatus.IDLE);
+			report.setWorkDatetime(null);
+			report.setApprovalStatus(AppStatus.IDLE);
+			report.setApprovalDatetime(null);
+			fileInfoRepository.softDeleteAllByRef("report", reportId, YnType.n, now, userId);
+		}
+
+		report.setReportStatus(targetStatus);
+		report.setUpdateMemberId(userId);
+
+		Log statusLog = Log.builder()
+				.logType("u")
+				.createMemberId(userId)
+				.createDatetime(now)
+				.workerName(user.getName())
+				.refTableId(reportId)
+				.refTable("report")
+				.logContent(String.format("[성적서상태변경] 고유번호 - [%d] → %s", reportId, newStatus))
+				.build();
+		logRepository.save(statusLog);
+
+		return new ResMessage<>(1, "상태가 변경되었습니다.", null);
 	}
 
 

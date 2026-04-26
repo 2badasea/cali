@@ -499,6 +499,15 @@ $(function () {
 				sortable: false,
 				renderer: { type: ReportFileDownloadRenderer },
 			},
+			{
+				// 수리/불가/초기화 상태변경 버튼 열 (StatusChangeCellRenderer — gridClass.js)
+				header: '상태변경',
+				name: 'statusChange',
+				width: 68,
+				align: 'center',
+				sortable: false,
+				renderer: { type: StatusChangeCellRenderer },
+			},
 		],
 		pageOptions: {
 			useClient: false, // 서버 페이징
@@ -518,16 +527,17 @@ $(function () {
 	// =====================================================================
 	$modal.grid.on('click', async function (ev) {
 		const { columnName, rowKey } = ev;
-		// 체크박스 rowHeader, 업로드 컬럼, 파일 다운로드 컬럼 클릭 무시
+		// 체크박스 rowHeader, 업로드 컬럼, 파일 다운로드 컬럼, 상태변경 컬럼 클릭 무시
 		if (columnName === '_checked' || columnName === 'uploadBtn'
-			|| columnName === 'originFileId' || columnName === 'excelFileId' || columnName === 'pdfFileId') return;
+			|| columnName === 'originFileId' || columnName === 'excelFileId' || columnName === 'pdfFileId'
+			|| columnName === 'statusChange') return;
 
 		const row = $modal.grid.getRow(rowKey);
 		if (!row || !row.id) return;
 
 		const reportNum = row.reportNum ?? '';
-		// COMPLETE(최종완료) 상태이면 저장 버튼 비활성화 (orderDetails.js 패턴 동일)
-		const isModifiable = row.reportStatus !== 'COMPLETE';
+		// 기술책임자 결재 완료(approvalStatus=SUCCESS)이면 저장 버튼 비활성화
+		const isModifiable = row.approvalStatus !== 'SUCCESS';
 		await gModal(
 			'/cali/reportModify',
 			{ id: row.id },
@@ -537,16 +547,89 @@ $(function () {
 				show_close_button: true,
 				show_confirm_button: isModifiable,
 				confirm_button_text: '저장',
-				// 성적서작성 버튼: reportModify.js에서 .modal-btn-write-report 클릭 핸들러가 처리
-				custom_btn_html_arr: [
-					'<button type="button" class="btn btn-primary btn-sm modal-btn-write-report mr-auto"><i class="bi bi-pencil-square"></i> 성적서작성</button>',
-				],
+				// 성적서작성·수리/불가/초기화 버튼은 reportModify.js init_modal에서 동적 삽입됨
 			},
 		);
 
 		// 모달 닫힘 후 현재 페이지 유지하며 그리드 재조회
 		const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 		$modal.grid.getPagination().movePageTo(currentPage);
+	});
+
+	// =====================================================================
+	// 행 배경색 적용: reportStatus·workStatus 기준으로 TUI Grid 행 CSS 클래스 설정
+	// response 이벤트 후 호출하여 서버 데이터 로드 시마다 갱신
+	// =====================================================================
+	const ROW_CLASS_NAMES = ['row-repair', 'row-impossible', 'row-rejected', 'row-resubmitted', 'row-approved'];
+
+	function applyRowClasses() {
+		const allRows = $modal.grid.getData();
+		allRows.forEach(function (row) {
+			const rowKey = row.rowKey;
+			ROW_CLASS_NAMES.forEach(cls => $modal.grid.removeRowClassName(rowKey, cls));
+			if (row.workStatus === 'SUCCESS') {
+				$modal.grid.addRowClassName(rowKey, 'row-approved');
+			} else if (row.reportStatus === 'REPAIR') {
+				$modal.grid.addRowClassName(rowKey, 'row-repair');
+			} else if (row.reportStatus === 'IMPOSSIBLE') {
+				$modal.grid.addRowClassName(rowKey, 'row-impossible');
+			} else if (row.reportStatus === 'REJECTED') {
+				$modal.grid.addRowClassName(rowKey, 'row-rejected');
+			} else if (row.reportStatus === 'RESUBMITTED') {
+				$modal.grid.addRowClassName(rowKey, 'row-resubmitted');
+			}
+		});
+	}
+
+	$modal.grid.on('response', function () {
+		requestAnimationFrame(() => applyRowClasses());
+	});
+
+	// =====================================================================
+	// 상태변경 버튼 클릭 핸들러 (StatusChangeCellRenderer 버튼 위임)
+	// PATCH /api/report/updateStatus/{id} 호출 후 현재 페이지 재조회
+	// =====================================================================
+	$('.workApprovalList').on('click', '.btn-status-repair, .btn-status-impossible, .btn-status-reset', async function (e) {
+		e.stopPropagation();
+		const $btn     = $(this);
+		const reportId = $btn.data('id');
+
+		let newStatus, confirmMsg;
+		if ($btn.hasClass('btn-status-repair')) {
+			newStatus  = 'REPAIR';
+			confirmMsg = '수리 처리하시겠습니까?<br><small class="text-muted">성적서작성·결재 데이터 및 파일이 초기화됩니다.</small>';
+		} else if ($btn.hasClass('btn-status-impossible')) {
+			newStatus  = 'IMPOSSIBLE';
+			confirmMsg = '불가 처리하시겠습니까?<br><small class="text-muted">성적서작성·결재 데이터 및 파일이 초기화됩니다.</small>';
+		} else {
+			newStatus  = 'NORMAL';
+			confirmMsg = '초기화(NORMAL) 처리하시겠습니까?';
+		}
+
+		const confirmResult = await gMessage('상태변경', confirmMsg, 'question', 'confirm');
+		if (!confirmResult.isConfirmed) return;
+
+		try {
+			gLoadingMessage('처리 중...');
+			const res = await fetch(`/api/report/updateStatus/${reportId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: JSON.stringify({ newStatus }),
+			});
+			swal.close();
+			if (!res.ok) throw res;
+			const data = await res.json();
+			if (data?.code > 0) {
+				gToast(data.msg ?? '상태가 변경되었습니다.', 'success');
+				const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
+				$modal.grid.getPagination().movePageTo(currentPage);
+			} else {
+				await gMessage('오류', data.msg ?? '처리 중 오류가 발생했습니다.', 'error', 'alert');
+			}
+		} catch (err) {
+			swal.close();
+			await gApiErrorHandler(err);
+		}
 	});
 
 	// =====================================================================
@@ -739,7 +822,7 @@ $(function () {
 		.on('click', '.btnReportUpload', async function () {
 			await gModal(
 				'/cali/reportUpload',
-				{},
+				{ type: 'work' },
 				{
 					title: '성적서업로드',
 					size: 'md',

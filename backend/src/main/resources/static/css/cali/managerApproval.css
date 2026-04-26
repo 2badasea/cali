@@ -1,0 +1,11 @@
+/* managerApproval.js 기술책임자결재 페이지 전용 스타일 */
+
+/* ============================================================
+   그리드 행 배경색 (결재상태별)
+   workApproval.css 의 row-* 클래스 재사용 가능, 아래는 추가분
+   ============================================================ */
+
+/* approval_status=SUCCESS (결재 완료) 행: 연한 보라 */
+.tui-grid-cell.row-ma-approved {
+    background-color: #f3e5f5 !important;
+}

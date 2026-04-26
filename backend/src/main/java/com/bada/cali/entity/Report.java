@@ -69,11 +69,11 @@ public class Report {
 	@Column(name = "item_cali_cycle", nullable = false)
 	private Integer itemCaliCycle;
 	
-	// 성적서 상태 (WAIT: 대기, REPAIR: 수리, IMPOSSIBLE: 불가, WORK_RETURN:  실무자반려, REUPLOAD: 재업로드, APPROV_RETURN: 기술책임자 반려 COMPLETE: 완료)
+	// 성적서 상태 (NORMAL: 기본, REPAIR: 수리, IMPOSSIBLE: 불가, REJECTED: 반려, RESUBMITTED: 재업로드)
 	@Column(name = "report_status", nullable = false, length = 50)
 	@Enumerated(EnumType.STRING)
 	@Builder.Default
-	private ReportStatus reportStatus = ReportStatus.WAIT;    // 기본: 대기
+	private ReportStatus reportStatus = ReportStatus.NORMAL;    // 기본
 	
 	// 취소, 불가, 반려 사유
 	@Column(name = "status_remark")

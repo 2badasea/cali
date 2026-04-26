@@ -1,0 +1,25 @@
+/* workApproval.js 실무자결재 페이지 전용 스타일 */
+
+/* ============================================================
+   그리드 행 배경색 (보고서 상태별)
+   TUI Grid의 addRowClassName() 으로 행 TR의 각 TD에 클래스가 부여됨
+   ============================================================ */
+.tui-grid-cell.row-repair {
+    background-color: #e0f7fa !important; /* 연한 하늘색 — 수리 */
+}
+
+.tui-grid-cell.row-impossible {
+    background-color: #fce4ec !important; /* 연한 빨간색 — 불가 */
+}
+
+.tui-grid-cell.row-rejected {
+    background-color: #fffde7 !important; /* 연한 노란색 — 반려 */
+}
+
+.tui-grid-cell.row-resubmitted {
+    background-color: #e3f2fd !important; /* 연한 파란색 — 재업로드 */
+}
+
+.tui-grid-cell.row-approved {
+    background-color: #e8f5e9 !important; /* 연한 초록색 — 실무자결재 완료 */
+}

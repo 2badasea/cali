@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/layout}"
+    xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <link rel="stylesheet" th:href="@{/css/cali/managerApproval.css}" />
+</head>
+
+<body>
+    <div layout:fragment="content">
+        <div class="wrapper">
+            <form class="searchForm mb-1" name="searchForm">
+                <div class="d-flex flex-wrap align-items-center mb-1" style="gap: 4px;">
+
+                    <!-- 좌측: 기능 버튼 + 행 수 -->
+                    <div class="d-flex align-items-center flex-wrap" style="gap: 4px;">
+                        <button type="button" class="btn btn-danger btn-sm btnReject">반려</button>
+                        <button type="button" class="btn btn-primary btn-sm btnMultiApprove">다중결재</button>
+                        <button type="button" class="btn btn-secondary btn-sm btnBulkCancel">일괄취소</button>
+                        <button type="button" class="btn btn-outline-primary btn-sm btnMultiUpload">다중업로드</button>
+                        <button type="button" class="btn btn-success btn-sm btnDownloadExcel">EXCEL 다운로드</button>
+                        <button type="button" class="btn btn-danger btn-sm btnDownloadPdf">PDF 다운로드</button>
+
+                        <!-- 행 수 -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text">행 수</span>
+                            </div>
+                            <select class="form-control form-control-sm rowLeng">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="200">200</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 우측: 검색 필터 -->
+                    <div class="ml-auto d-flex align-items-center" style="gap: 4px; flex-wrap: nowrap;">
+
+                        <!-- 날짜 타입 -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <select class="form-control form-control-sm" name="dateType" style="width: 80px;">
+                                <option value="cali" selected>교정일</option>
+                                <option value="receipt">접수일</option>
+                                <option value="approval">결재일</option>
+                            </select>
+                        </div>
+
+                        <!-- 기간 -->
+                        <input type="date" class="form-control form-control-sm" name="startDate" style="width: 130px;" />
+                        <span class="input-group-text" style="border:none; padding:0 2px;">~</span>
+                        <input type="date" class="form-control form-control-sm" name="endDate" style="width: 130px;" />
+
+                        <!-- 중분류 / 소분류 -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <select class="form-control form-control-sm middleCodeSelect" style="width: 145px;">
+                                <option value="">중분류전체</option>
+                            </select>
+                        </div>
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <select class="form-control form-control-sm smallCodeSelect" style="width: 145px;">
+                                <option value="">소분류전체</option>
+                            </select>
+                        </div>
+
+                        <!-- 결재상태 -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <select class="form-control form-control-sm" name="approvalStatus" style="width: 100px;">
+                                <option value="" selected>결재상태</option>
+                                <option value="IDLE">대기</option>
+                                <option value="SUCCESS">결재완료</option>
+                            </select>
+                        </div>
+
+                        <!-- 검색타입 + 키워드 -->
+                        <div class="input-group input-group-sm">
+                            <select class="form-control form-control-sm" name="searchType" style="width: 120px; margin-right: 5px;">
+                                <option value="">전체</option>
+                                <option value="reportNum">성적서번호</option>
+                                <option value="agentName">신청업체</option>
+                                <option value="publishName">성적서발행처</option>
+                                <option value="itemName">기기명</option>
+                                <option value="itemNum">기기번호</option>
+                                <option value="manufacturer">제작회사</option>
+                                <option value="modelType">형식</option>
+                                <option value="workMember">실무자</option>
+                                <option value="approvalMember">기술책임자</option>
+                            </select>
+                            <input type="text" class="form-control form-control-sm" name="keyword" style="width: 120px;" />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </div>
+
+                </div>
+            </form>
+
+            <div class="grid managerApprovalList"></div>
+        </div>
+    </div>
+</body>
+
+</html>

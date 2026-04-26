@@ -8,6 +8,7 @@ import com.bada.cali.repository.projection.LastManageNoByType;
 import com.bada.cali.repository.projection.LastReportNumByOrderType;
 import com.bada.cali.repository.projection.OrderDetailsList;
 import com.bada.cali.repository.projection.ReportCountRow;
+import com.bada.cali.repository.projection.ManagerApprovalListRow;
 import com.bada.cali.repository.projection.WorkApprovalListRow;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -492,6 +493,172 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			@Param("orderType") String orderType,
 			@Param("middleItemCodeId") Long middleItemCodeId,
 			@Param("smallItemCodeId") Long smallItemCodeId,
+			@Param("searchType") String searchType,
+			@Param("keyword") String keyword
+	);
+
+	/**
+	 * 기술책임자결재 목록 조회 (native query)
+	 * - work_status = 'SUCCESS' (실무자결재 완료) 성적서만 대상
+	 * - approval_status 필터: null이면 SUCCESS 제외 전체, 값이 있으면 해당 상태만
+	 * - dateType: cali(교정일), receipt(접수일), approval(결재일)
+	 * - 정렬: 교정일 DESC 기본
+	 */
+	@Query(value = """
+			SELECT
+			    r.id                                                  AS id,
+			    r.report_num                                          AS reportNum,
+			    sic.code_num                                          AS codeSmallName,
+			    o.order_date                                          AS receiptDate,
+			    r.expect_complete_date                                AS expectCompleteDate,
+			    o.cust_agent                                          AS agentName,
+			    o.report_agent                                        AS publishName,
+			    r.item_name                                           AS itemName,
+			    r.item_num                                            AS itemNum,
+			    r.item_make_agent                                     AS manufacturer,
+			    r.item_format                                         AS modelType,
+			    r.cali_date                                           AS caliDate,
+			    r.report_lang                                         AS reportLang,
+			    wm.name                                               AS workMemberName,
+			    am.name                                               AS approvalMemberName,
+			    r.approval_status                                     AS approvalStatus,
+			    r.approval_datetime                                   AS approvalDatetime,
+			    (SELECT fi.id FROM file_info fi
+			         WHERE fi.ref_table_name = 'report'
+			           AND fi.ref_table_id   = r.id
+			           AND fi.name           = 'origin'
+			           AND fi.is_visible     = 'y'
+			         LIMIT 1)                                         AS originFileId,
+			    (SELECT fi.id FROM file_info fi
+			         WHERE fi.ref_table_name = 'report'
+			           AND fi.ref_table_id   = r.id
+			           AND fi.name           = 'signed_xlsx'
+			           AND fi.is_visible     = 'y'
+			         LIMIT 1)                                         AS signedXlsxFileId,
+			    (SELECT fi.id FROM file_info fi
+			         WHERE fi.ref_table_name = 'report'
+			           AND fi.ref_table_id   = r.id
+			           AND fi.name           = 'signed_pdf'
+			           AND fi.is_visible     = 'y'
+			         LIMIT 1)                                         AS signedPdfFileId
+			FROM report r
+			LEFT JOIN cali_order o  ON o.id  = r.cali_order_id
+			LEFT JOIN item_code sic ON sic.id = r.small_item_code_id
+			LEFT JOIN member wm     ON wm.id  = r.work_member_id
+			LEFT JOIN member am     ON am.id  = r.approval_member_id
+			WHERE r.is_visible        = 'y'
+			  AND r.report_type       = 'SELF'
+			  AND r.parent_scale_id   IS NULL
+			  AND r.work_status       = 'SUCCESS'
+			  AND (
+			      (:approvalStatus IS NOT NULL AND r.approval_status = :approvalStatus)
+			      OR (:approvalStatus IS NULL AND r.approval_status != 'SUCCESS')
+			  )
+			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
+			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
+			  AND (
+			      :startDate IS NULL OR :endDate IS NULL OR (
+			          (:dateType = 'cali'     AND r.cali_date          BETWEEN :startDate AND :endDate)
+			          OR (:dateType = 'receipt'  AND o.order_date      BETWEEN :startDate AND :endDate)
+			          OR (:dateType = 'approval' AND r.approval_datetime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59'))
+			      )
+			  )
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'reportNum'      AND r.report_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agentName'   AND o.cust_agent       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'publishName' AND o.report_agent     LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'    AND r.item_name        LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'     AND r.item_num         LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'manufacturer' AND r.item_make_agent LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'modelType'   AND r.item_format      LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'workMember'  AND wm.name            LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'approvalMember' AND am.name         LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'all' AND (
+			                r.report_num         LIKE CONCAT('%', :keyword, '%')
+			                OR o.cust_agent      LIKE CONCAT('%', :keyword, '%')
+			                OR o.report_agent    LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_name       LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_num        LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_make_agent LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_format     LIKE CONCAT('%', :keyword, '%')
+			                OR wm.name           LIKE CONCAT('%', :keyword, '%')
+			                OR am.name           LIKE CONCAT('%', :keyword, '%')
+			          ))
+			      )
+			  )
+			ORDER BY r.cali_date DESC, r.id DESC
+			""", nativeQuery = true)
+	List<ManagerApprovalListRow> searchManagerApprovalList(
+			@Param("approvalStatus") String approvalStatus,
+			@Param("middleItemCodeId") Long middleItemCodeId,
+			@Param("smallItemCodeId") Long smallItemCodeId,
+			@Param("dateType") String dateType,
+			@Param("startDate") String startDate,
+			@Param("endDate") String endDate,
+			@Param("searchType") String searchType,
+			@Param("keyword") String keyword,
+			Pageable pageable
+	);
+
+	/**
+	 * 기술책임자결재 목록 전체 건수 (searchManagerApprovalList 동일 WHERE 조건)
+	 */
+	@Query(value = """
+			SELECT COUNT(*)
+			FROM report r
+			LEFT JOIN cali_order o  ON o.id  = r.cali_order_id
+			LEFT JOIN member wm     ON wm.id  = r.work_member_id
+			LEFT JOIN member am     ON am.id  = r.approval_member_id
+			WHERE r.is_visible        = 'y'
+			  AND r.report_type       = 'SELF'
+			  AND r.parent_scale_id   IS NULL
+			  AND r.work_status       = 'SUCCESS'
+			  AND (
+			      (:approvalStatus IS NOT NULL AND r.approval_status = :approvalStatus)
+			      OR (:approvalStatus IS NULL AND r.approval_status != 'SUCCESS')
+			  )
+			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
+			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
+			  AND (
+			      :startDate IS NULL OR :endDate IS NULL OR (
+			          (:dateType = 'cali'     AND r.cali_date          BETWEEN :startDate AND :endDate)
+			          OR (:dateType = 'receipt'  AND o.order_date      BETWEEN :startDate AND :endDate)
+			          OR (:dateType = 'approval' AND r.approval_datetime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59'))
+			      )
+			  )
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'reportNum'      AND r.report_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agentName'   AND o.cust_agent       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'publishName' AND o.report_agent     LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'    AND r.item_name        LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'     AND r.item_num         LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'manufacturer' AND r.item_make_agent LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'modelType'   AND r.item_format      LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'workMember'  AND wm.name            LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'approvalMember' AND am.name         LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'all' AND (
+			                r.report_num         LIKE CONCAT('%', :keyword, '%')
+			                OR o.cust_agent      LIKE CONCAT('%', :keyword, '%')
+			                OR o.report_agent    LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_name       LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_num        LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_make_agent LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_format     LIKE CONCAT('%', :keyword, '%')
+			                OR wm.name           LIKE CONCAT('%', :keyword, '%')
+			                OR am.name           LIKE CONCAT('%', :keyword, '%')
+			          ))
+			      )
+			  )
+			""", nativeQuery = true)
+	long countManagerApprovalList(
+			@Param("approvalStatus") String approvalStatus,
+			@Param("middleItemCodeId") Long middleItemCodeId,
+			@Param("smallItemCodeId") Long smallItemCodeId,
+			@Param("dateType") String dateType,
+			@Param("startDate") String startDate,
+			@Param("endDate") String endDate,
 			@Param("searchType") String searchType,
 			@Param("keyword") String keyword
 	);

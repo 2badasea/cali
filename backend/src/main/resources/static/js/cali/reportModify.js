@@ -21,6 +21,23 @@
 	$modal.init_modal = async (param) => {
 		$modal.param = param;
 
+		// 수리/불가/초기화 + 성적서작성 버튼을 모달 푸터에 동적 삽입
+		// - 호출 페이지에서 custom_btn_html_arr를 전달할 필요 없이 이 모달이 항상 자체 삽입
+		// - 재사용 시 중복 방지를 위해 기존 삽입 버튼 먼저 제거
+		const $footer = $modal_root.find('.modal-footer');
+		$footer.find('.modal-btn-write-report, .modal-btn-group-status').remove();
+		const $customBtns = $(
+			'<button type="button" class="btn btn-primary btn-sm modal-btn-write-report">' +
+				'<i class="bi bi-pencil-square"></i> 성적서작성</button>' +
+			'<div class="btn-group btn-group-sm modal-btn-group-status" style="margin-left:4px;">' +
+				'<button type="button" class="btn btn-secondary btn-sm modal-btn-repair">수리</button>' +
+				'<button type="button" class="btn btn-secondary btn-sm modal-btn-impossible">불가</button>' +
+				'<button type="button" class="btn btn-warning btn-sm modal-btn-reset">초기화</button>' +
+			'</div>'
+		);
+		$footer.prepend($customBtns);
+		$footer.removeClass('d-none');
+
 		// 중분류와 소분류 정보를 가져와서 초기화를 진행한다.
 		await $modal.initItemCodeSet();
 
@@ -83,6 +100,9 @@
 						const smallCodeList = smallItemCodeSet[parentInfo.middleItemCodeId] ?? [];
 						const matchedCode = smallCodeList.find((s) => s.id == parentInfo.smallItemCodeId);
 						$modal.smallCodeNum = matchedCode?.codeNum ?? '';
+						// 수리/불가/초기화 버튼 색상 초기 적용
+						$modal.reportStatus = parentInfo.reportStatus;
+						updateStatusButtons(parentInfo.reportStatus);
 						// 중분류코드 기준으로 실무자/기술책임자 option 세팅 및 기존 선택값 복원
 						await $modal.loadMemberOptions(
 							parentInfo.middleItemCodeId,
@@ -402,6 +422,107 @@
 				show_close_button: true,
 			},
 		);
+	});
+
+	// 수리/불가 버튼 활성색상 토글 (REPAIR=하늘색, IMPOSSIBLE=빨간색, NORMAL=기본 회색)
+	function updateStatusButtons(status) {
+		$modal_root.find('.modal-btn-repair')
+			.removeClass('btn-info btn-secondary')
+			.addClass(status === 'REPAIR' ? 'btn-info' : 'btn-secondary');
+		$modal_root.find('.modal-btn-impossible')
+			.removeClass('btn-danger btn-secondary')
+			.addClass(status === 'IMPOSSIBLE' ? 'btn-danger' : 'btn-secondary');
+	}
+
+	// 수리 처리
+	$modal_root.on('click', '.modal-btn-repair', async function () {
+		const confirmResult = await gMessage(
+			'수리 처리',
+			'수리 처리하시겠습니까?<br><small class="text-muted">성적서작성·결재 데이터 및 파일이 초기화됩니다.</small>',
+			'question',
+			'confirm'
+		);
+		if (!confirmResult.isConfirmed) return;
+		try {
+			gLoadingMessage('처리 중...');
+			const res = await fetch(`/api/report/updateStatus/${id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: JSON.stringify({ newStatus: 'REPAIR' }),
+			});
+			swal.close();
+			if (!res.ok) throw res;
+			const data = await res.json();
+			if (data?.code > 0) {
+				$modal.reportStatus = 'REPAIR';
+				updateStatusButtons('REPAIR');
+				gToast('수리 처리되었습니다.', 'success');
+			} else {
+				await gMessage('오류', data.msg ?? '처리 중 오류가 발생했습니다.', 'error', 'alert');
+			}
+		} catch (err) {
+			swal.close();
+			await gApiErrorHandler(err);
+		}
+	});
+
+	// 불가 처리
+	$modal_root.on('click', '.modal-btn-impossible', async function () {
+		const confirmResult = await gMessage(
+			'불가 처리',
+			'불가 처리하시겠습니까?<br><small class="text-muted">성적서작성·결재 데이터 및 파일이 초기화됩니다.</small>',
+			'question',
+			'confirm'
+		);
+		if (!confirmResult.isConfirmed) return;
+		try {
+			gLoadingMessage('처리 중...');
+			const res = await fetch(`/api/report/updateStatus/${id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: JSON.stringify({ newStatus: 'IMPOSSIBLE' }),
+			});
+			swal.close();
+			if (!res.ok) throw res;
+			const data = await res.json();
+			if (data?.code > 0) {
+				$modal.reportStatus = 'IMPOSSIBLE';
+				updateStatusButtons('IMPOSSIBLE');
+				gToast('불가 처리되었습니다.', 'success');
+			} else {
+				await gMessage('오류', data.msg ?? '처리 중 오류가 발생했습니다.', 'error', 'alert');
+			}
+		} catch (err) {
+			swal.close();
+			await gApiErrorHandler(err);
+		}
+	});
+
+	// 초기화 처리 (NORMAL)
+	$modal_root.on('click', '.modal-btn-reset', async function () {
+		const confirmResult = await gMessage('초기화', '초기화(NORMAL) 처리하시겠습니까?', 'question', 'confirm');
+		if (!confirmResult.isConfirmed) return;
+		try {
+			gLoadingMessage('처리 중...');
+			const res = await fetch(`/api/report/updateStatus/${id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: JSON.stringify({ newStatus: 'NORMAL' }),
+			});
+			swal.close();
+			if (!res.ok) throw res;
+			const data = await res.json();
+			if (data?.code > 0) {
+				$modal.reportStatus = 'NORMAL';
+				updateStatusButtons('NORMAL');
+				gToast('초기화되었습니다.', 'success');
+			} else {
+				await gMessage('오류', data.msg ?? '처리 중 오류가 발생했습니다.', 'error', 'alert');
+			}
+		} catch (err) {
+			swal.close();
+			await gApiErrorHandler(err);
+		}
 	});
 
 	// 저장
