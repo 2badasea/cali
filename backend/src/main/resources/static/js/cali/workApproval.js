@@ -581,6 +581,7 @@ $(function () {
 		});
 	}
 
+	// 그리드가 렌더링되면 색상표시 활성화
 	$modal.grid.on('response', function () {
 		requestAnimationFrame(() => applyRowClasses());
 	});

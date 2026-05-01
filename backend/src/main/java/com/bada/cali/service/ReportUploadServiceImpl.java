@@ -94,6 +94,12 @@ public class ReportUploadServiceImpl {
 
             // manager 모드: 기술책임자결재 완료 성적서에 대한 signed 파일 교체
             if ("manager".equals(mode)) {
+                if (report.getApprovalStatus() == AppStatus.READY
+                        || report.getApprovalStatus() == AppStatus.PROGRESS) {
+                    invalid.add(new ReportJobBatchDTO.InvalidItem(report.getId(), reportNum,
+                            "기술책임자결재가 진행 중인 성적서입니다."));
+                    continue;
+                }
                 if (report.getApprovalStatus() != AppStatus.SUCCESS) {
                     invalid.add(new ReportJobBatchDTO.InvalidItem(report.getId(), reportNum,
                             "기술책임자결재가 완료된 성적서만 파일 교체가 가능합니다."));

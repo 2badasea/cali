@@ -66,6 +66,28 @@ public class ExcelWorkDTO {
         private String serverUrl;
     }
 
+    @Getter
+    @Setter
+    @Schema(description = "기술책임자결재 작업 요청")
+    public static class CreateManagerApprovalJobReq {
+
+        @NotEmpty
+        @Schema(description = "결재 대상 성적서 id 목록 (1건 이상)", example = "[1, 2, 3]")
+        private List<Long> reportIds;
+
+        @NotBlank
+        @Schema(description = "결재일자 (yyyy-MM-dd)", example = "2026-05-01")
+        private String approvalDate;
+
+        /**
+         * 미들웨어가 콜백을 보낼 서버 URL.
+         * null이면 서버의 app.cali.callback-base-url 설정값 사용.
+         */
+        @Schema(description = "미들웨어가 콜백을 보낼 CALI 서버 URL (null 허용, 서버 설정값 폴백)",
+                example = "https://mycali.com")
+        private String serverUrl;
+    }
+
     /** createJob 응답 — 브라우저가 excelworkUri를 URI 스킴으로 실행 */
     public record CreateJobRes(
             @Schema(description = "생성된 배치 id") Long batchId,

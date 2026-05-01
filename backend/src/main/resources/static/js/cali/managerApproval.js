@@ -64,6 +64,90 @@ $(function () {
 	window.downloadReportFile = downloadReportFile;
 
 	// =====================================================================
+	// 결재 공통 처리 함수 — 단건(확인 버튼) / 다건(다중결재 버튼) 공유
+	//
+	// 처리 흐름:
+	//   1. 결재 불가 케이스 사전 검증 (approval_status 기준)
+	//   2. SweetAlert2 + jQuery UI datepicker 로 결재일자 선택
+	//   3. POST /api/excelwork/batches/manager-approval 호출
+	//   4. excelworkUri 로 ExcelWorkApp 기동, 그리드 갱신
+	// =====================================================================
+	async function doApprove(rows) {
+		if (!rows.length) {
+			gToast('결재할 성적서를 선택하세요.', 'warning');
+			return;
+		}
+
+		// approval_status 검증: READY/PROGRESS/SUCCESS → 결재 불가
+		const blocked = rows.filter(r => ['READY', 'PROGRESS', 'SUCCESS'].includes(r.approvalStatus));
+		if (blocked.length > 0) {
+			const nums = blocked.map(r => r.reportNum).join(', ');
+			await gMessage('결재 불가',
+				`아래 성적서는 결재가 진행 중이거나 완료되었습니다:<br>${nums}`,
+				'warning', 'alert');
+			return;
+		}
+
+		// 결재일자 선택 SweetAlert2 (기존 의존성 jQuery UI datepicker 사용)
+		const { isConfirmed, value: approvalDate } = await Swal.fire({
+			title: '결재일자 선택',
+			html: '<input type="text" id="swalApprovalDate" class="swal2-input"'
+				+ ' placeholder="날짜를 선택하세요" readonly style="cursor:pointer;">',
+			confirmButtonText: '결재',
+			cancelButtonText: '취소',
+			showCancelButton: true,
+			focusConfirm: false,
+			didOpen: () => {
+				// z-index 조정: jQuery UI datepicker 달력이 SweetAlert2 위에 표시되도록
+				$('#swalApprovalDate').datepicker({
+					dateFormat: 'yy-mm-dd',
+					beforeShow: (input, inst) => {
+						setTimeout(() => { inst.dpDiv.css('z-index', 99999); }, 0);
+					},
+				});
+			},
+			preConfirm: () => {
+				const date = $('#swalApprovalDate').val().trim();
+				if (!date) {
+					Swal.showValidationMessage('결재일자를 선택해주세요.');
+					return false;
+				}
+				return date;
+			},
+			willClose: () => {
+				try { $('#swalApprovalDate').datepicker('destroy'); } catch (e) { /* ignore */ }
+			},
+		});
+
+		if (!isConfirmed || !approvalDate) return;
+
+		const reportIds = rows.map(r => r.id);
+
+		try {
+			gLoadingMessage('결재처리중입니다...');
+			const res = await fetch('/api/excelwork/batches/manager-approval', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: JSON.stringify({ reportIds, approvalDate }),
+			});
+			swal.close();
+			if (!res.ok) throw res;
+			const data = await res.json();
+			if (data?.code > 0) {
+				// ExcelWorkApp 기동 (URI 스킴 실행)
+				const uri = data.data?.excelworkUri;
+				if (uri) window.location.href = uri;
+				$modal.grid.getPagination().movePageTo(currentPage);
+			} else {
+				await gMessage('오류', data.msg ?? '처리 중 오류가 발생했습니다.', 'error', 'alert');
+			}
+		} catch (err) {
+			swal.close();
+			await gApiErrorHandler(err);
+		}
+	}
+
+	// =====================================================================
 	// init_modal: 중/소분류 코드 비동기 초기화
 	// =====================================================================
 	$modal.init_modal = async (param) => {
@@ -321,6 +405,42 @@ $(function () {
 	});
 
 	// =====================================================================
+	// 그리드 행 클릭 → 성적서수정(reportModify) 모달 호출
+	// 체크박스·파일다운로드·결재자·취소 컬럼 클릭은 제외
+	// 결재 완료(approvalStatus=SUCCESS) 행은 저장 버튼 비활성화 (읽기 전용 뷰)
+	// =====================================================================
+	$modal.grid.on('click', async function (ev) {
+		const { columnName, rowKey } = ev;
+		if (columnName === '_checked'
+			|| columnName === 'originFileId'
+			|| columnName === 'signedXlsxFileId'
+			|| columnName === 'signedPdfFileId'
+			|| columnName === 'approvalStatus'
+			|| columnName === 'cancel'
+			|| columnName === 'progress') return;
+
+		const row = $modal.grid.getRow(rowKey);
+		if (!row || !row.id) return;
+
+		const reportNum = row.reportNum ?? '';
+		// 결재 완료 상태이면 저장 버튼 비활성화 (읽기 전용 뷰)
+		const isModifiable = row.approvalStatus !== 'SUCCESS';
+		await gModal(
+			'/cali/reportModify',
+			{ id: row.id },
+			{
+				title: `성적서 수정 [성적서번호 - ${reportNum}]`,
+				size: 'xxxl',
+				show_close_button: true,
+				show_confirm_button: isModifiable,
+				confirm_button_text: '저장',
+			}
+		);
+
+		$modal.grid.getPagination().movePageTo(currentPage);
+	});
+
+	// =====================================================================
 	// 검색 폼 이벤트
 	// =====================================================================
 	$modal
@@ -368,11 +488,15 @@ $(function () {
 	});
 
 	// =====================================================================
-	// '결재자' 열 — 확인(결재) 버튼 (단건) — UI 골격만, 핸들러 추후 구현
+	// '결재자' 열 — 확인(결재) 버튼 (단건)
 	// =====================================================================
 	$('.managerApprovalList').on('click', '.btn-manager-approve', async function (e) {
 		e.stopPropagation();
-		gToast('결재 기능은 추후 구현 예정입니다.', 'info');
+		const reportId = $(this).data('id');
+		const row = $modal.grid.getData().find(r => r.id === reportId);
+		if (!row) return;
+		await doApprove([row]);
+		$modal.grid.getPagination().movePageTo(currentPage);
 	});
 
 	// =====================================================================
@@ -449,10 +573,16 @@ $(function () {
 	});
 
 	// =====================================================================
-	// 다중결재 버튼 — UI 골격만
+	// 다중결재 버튼 (체크박스 다건)
 	// =====================================================================
-	$modal.on('click', '.btnMultiApprove', function () {
-		gToast('결재 기능은 추후 구현 예정입니다.', 'info');
+	$modal.on('click', '.btnMultiApprove', async function () {
+		const checkedRows = $modal.grid.getCheckedRows();
+		if (!checkedRows.length) {
+			gToast('결재할 성적서를 선택하세요.', 'warning');
+			return;
+		}
+		await doApprove(checkedRows);
+		$modal.grid.getPagination().movePageTo(currentPage);
 	});
 
 	// =====================================================================

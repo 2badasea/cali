@@ -76,6 +76,8 @@ public class CustomSecurityConfig {
 								, "/api/excelwork/callback/**"
 								// 서명 이미지 중계: token 으로 식별, X-Callback-Key 로 컨트롤러 레벨 검증
 								, "/api/excelwork/sign-image/**"
+								// 기술책임자결재 QR코드 PDF 공개 뷰어 (미인증 접근 허용 — QR코드 스캔 대응)
+								, "/r/**"
 						).permitAll()
 						.anyRequest().authenticated()                // 그외 요청에 대해선 인증된 사용자만 허용
 				)

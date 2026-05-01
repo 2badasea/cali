@@ -342,6 +342,149 @@ public class ExcelWorkServiceImpl {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 1-3. createManagerApprovalJob — 기술책임자결재 배치 생성 + excelwork:// URI 발급
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 기술책임자결재 작업 요청 처리.
+     *
+     * 처리 순서:
+     *  1. 성적서 유효성 검증
+     *     - workStatus=SUCCESS (실무자결재 완료 필수)
+     *     - approvalStatus가 READY/PROGRESS/SUCCESS가 아닌 것만 허용 (중복 차단)
+     *     - approvalMemberId not null (기술책임자 지정 필수)
+     *  2. 기술책임자 서명 이미지 존재 확인
+     *  3. report.approvalDatetime 선반영 (approvalDate 파싱 → LocalDateTime)
+     *     → DB 스키마 변경 없이 배치 생성 시 결재일자를 미리 저장.
+     *       콜백(callbackManagerApprovalItemDone) 시에는 approvalStatus=SUCCESS만 업데이트.
+     *  4. report.approvalStatus → READY
+     *  5. ReportJobBatch 생성 (JobType=MANAGER_APPROVAL)
+     *  6. ReportJobItem 목록 생성
+     *  7. 로그 기록
+     *  8. excelwork:// URI + 응답 반환
+     *
+     * @param req      성적서 id 목록 + 결재일자(yyyy-MM-dd) + 선택 serverUrl
+     * @param memberId 요청 사용자 id (기술책임자 본인)
+     */
+    @Transactional
+    public ExcelWorkDTO.CreateJobRes createManagerApprovalJob(ExcelWorkDTO.CreateManagerApprovalJobReq req, Long memberId) {
+
+        List<Long> reportIds = req.getReportIds();
+
+        // ── 1. 성적서 조회 및 유효성 검증 ────────────────────────────────────
+        List<Report> reports = reportRepository.findAllById(reportIds);
+        if (reports.size() != reportIds.size()) {
+            throw new EntityNotFoundException("존재하지 않는 성적서가 포함되어 있습니다.");
+        }
+
+        java.util.Set<Long> approvalMemberIds = new java.util.HashSet<>();
+        for (Report report : reports) {
+            if (report.getIsVisible() != YnType.y) {
+                throw new IllegalArgumentException(
+                        String.format("삭제된 성적서가 포함되어 있습니다. (id: %d)", report.getId()));
+            }
+            if (report.getReportType() != ReportType.SELF) {
+                throw new IllegalArgumentException(
+                        String.format("자체성적서(SELF)만 처리 가능합니다. (id: %d)", report.getId()));
+            }
+            if (report.getWorkStatus() != AppStatus.SUCCESS) {
+                throw new IllegalArgumentException(
+                        String.format("실무자결재가 완료되지 않은 성적서입니다. (id: %d)", report.getId()));
+            }
+            if (report.getApprovalStatus() == AppStatus.READY || report.getApprovalStatus() == AppStatus.PROGRESS) {
+                throw new IllegalArgumentException(
+                        String.format("이미 기술책임자결재가 진행 중인 성적서입니다. (id: %d)", report.getId()));
+            }
+            if (report.getApprovalStatus() == AppStatus.SUCCESS) {
+                throw new IllegalArgumentException(
+                        String.format("이미 기술책임자결재가 완료된 성적서입니다. (id: %d)", report.getId()));
+            }
+            if (report.getApprovalMemberId() == null) {
+                throw new IllegalArgumentException(
+                        String.format("기술책임자가 지정되지 않은 성적서입니다. (id: %d)", report.getId()));
+            }
+            approvalMemberIds.add(report.getApprovalMemberId());
+        }
+
+        // ── 2. 기술책임자 서명 이미지 존재 확인 ──────────────────────────────
+        List<FileInfo> signFileList = fileInfoRepository
+                .findByRefTableNameAndRefTableIdInAndIsVisible("member", approvalMemberIds, YnType.y);
+        java.util.Set<Long> memberIdsWithSign = signFileList.stream()
+                .map(FileInfo::getRefTableId)
+                .collect(java.util.stream.Collectors.toSet());
+        for (Report report : reports) {
+            if (!memberIdsWithSign.contains(report.getApprovalMemberId())) {
+                throw new IllegalArgumentException(
+                        String.format("기술책임자 서명 이미지가 등록되어 있지 않습니다. 해당 기술책임자의 서명 이미지를 먼저 등록해 주세요. (approvalMemberId=%d)",
+                                report.getApprovalMemberId()));
+            }
+        }
+
+        // ── 3. 결재일자 파싱 ─────────────────────────────────────────────────
+        LocalDateTime approvalDatetime;
+        try {
+            approvalDatetime = LocalDate.parse(req.getApprovalDate()).atStartOfDay();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("결재일자 형식이 올바르지 않습니다. (yyyy-MM-dd 형식으로 입력하세요)");
+        }
+
+        // ── 4. 성적서 approvalDatetime 선반영 + approvalStatus → READY ───────
+        // 결재일자를 배치 생성 시점에 미리 저장하여 DB 스키마 변경 없이 ExcelWorkApp에 전달.
+        // 콜백(callbackManagerApprovalItemDone) 시에는 approvalStatus=SUCCESS만 업데이트.
+        reports.forEach(r -> {
+            r.setApprovalDatetime(approvalDatetime);
+            r.setApprovalStatus(AppStatus.READY);
+            r.setApprovalMemberId(memberId);
+        });
+
+        // ── 5. ReportJobBatch 생성 ────────────────────────────────────────────
+        String token = UUID.randomUUID().toString().replace("-", "");
+        ReportJobBatch batch = batchRepository.save(ReportJobBatch.builder()
+                .jobType(JobType.MANAGER_APPROVAL)
+                .requestMemberId(memberId)
+                .sampleId(null)
+                .totalCount(reportIds.size())
+                .status(BatchStatus.READY)
+                .token(token)
+                .createDatetime(LocalDateTime.now())
+                .build());
+
+        // ── 6. ReportJobItem 생성 — item별 fileUuid 부여 ──────────────────────
+        List<ReportJobItem> items = reportIds.stream()
+                .map(reportId -> ReportJobItem.builder()
+                        .batchId(batch.getId())
+                        .reportId(reportId)
+                        .fileUuid(UUID.randomUUID().toString())
+                        .build())
+                .collect(Collectors.toList());
+        itemRepository.saveAll(items);
+
+        // ── 7. 로그 기록 ──────────────────────────────────────────────────────
+        logRepository.save(Log.builder()
+                .workerName("system")
+                .logContent(String.format(
+                        "ExcelWork 기술책임자결재 배치 생성 (batchId: %d, token: %s, 결재일자: %s) — 고유번호 - %s",
+                        batch.getId(), token, req.getApprovalDate(), reportIds))
+                .logType("i")
+                .refTable("report_job_batch")
+                .refTableId(batch.getId())
+                .createDatetime(LocalDateTime.now())
+                .createMemberId(memberId)
+                .build());
+
+        log.info("ExcelWork 기술책임자결재 배치 생성 완료 — batchId: {}, token: {}, 결재일자: {}, 건수: {}",
+                batch.getId(), token, req.getApprovalDate(), reportIds.size());
+
+        // ── 8. excelwork:// URI 생성 ─────────────────────────────────────────
+        String serverUrl = resolveServerUrl(req.getServerUrl());
+        String excelworkUri = "excelwork://process?token=" + token
+                + "&serverUrl=" + URLEncoder.encode(serverUrl, StandardCharsets.UTF_8)
+                + "&callbackKey=" + URLEncoder.encode(excelworkCallbackKey, StandardCharsets.UTF_8);
+
+        return new ExcelWorkDTO.CreateJobRes(batch.getId(), token, excelworkUri, reportIds.size());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 2. getJobByToken — 미들웨어용 잡 상세 조회 (완전한 JSON)
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -394,11 +537,23 @@ public class ExcelWorkServiceImpl {
             String fileDownloadUrl = base + "/api/excelwork/file/" + item.getFileUuid();
 
             // WORK_APPROVAL: item별 서명 이미지 URL — 해당 성적서의 workMemberId 기준
-            // GET /api/excelwork/sign-image/member/{workMemberId}
+            // MANAGER_APPROVAL: 기술책임자 서명 이미지 URL — approvalMemberId 기준
+            // GET /api/excelwork/sign-image/member/{memberId}
             String itemSignImgUrl = null;
             if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL
                     && report.getWorkMemberId() != null) {
                 itemSignImgUrl = base + "/api/excelwork/sign-image/member/" + report.getWorkMemberId();
+            } else if (batch.getJobType() == com.bada.cali.common.enums.JobType.MANAGER_APPROVAL
+                    && report.getApprovalMemberId() != null) {
+                itemSignImgUrl = base + "/api/excelwork/sign-image/member/" + report.getApprovalMemberId();
+            }
+
+            // MANAGER_APPROVAL: data 맵에 결재일자 + QR코드 URL 삽입
+            if (batch.getJobType() == com.bada.cali.common.enums.JobType.MANAGER_APPROVAL) {
+                String approvalDateStr = report.getApprovalDatetime() != null
+                        ? report.getApprovalDatetime().toLocalDate().toString() : null;
+                data.put("approvalDate", approvalDateStr);
+                data.put("qrCodeUrl",    base + "/r/" + report.getId());
             }
 
             return new ExcelWorkDTO.ItemDetail(
@@ -479,10 +634,15 @@ public class ExcelWorkServiceImpl {
         log.info("파일 스트리밍 요청 — fileUuid: {}, batchId: {}, reportId: {}, jobType: {}",
                 fileUuid, batch.getId(), item.getReportId(), batch.getJobType());
 
-        // jobType 분기: WRITE → 샘플 파일, WORK_APPROVAL → origin.xlsx
+        // jobType 분기: WRITE → 샘플 파일, WORK_APPROVAL → origin.xlsx, MANAGER_APPROVAL → signed.xlsx
         if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL) {
             String objectKey = storageProps.getRootDir() + "/report/" + item.getReportId() + "/origin.xlsx";
             return streamFromStorage(objectKey, "origin.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        if (batch.getJobType() == com.bada.cali.common.enums.JobType.MANAGER_APPROVAL) {
+            String objectKey = storageProps.getRootDir() + "/report/" + item.getReportId() + "/signed.xlsx";
+            return streamFromStorage(objectKey, "signed.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         }
         return streamSampleFile(batch);
@@ -583,12 +743,11 @@ public class ExcelWorkServiceImpl {
         });
 
         // jobType에 따라 성적서의 다른 상태 필드를 PROGRESS로 전환
-        boolean isWorkApproval = batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL;
         items.forEach(item -> reportRepository.findById(item.getReportId()).ifPresent(r -> {
-            if (isWorkApproval) {
-                r.setWorkStatus(AppStatus.PROGRESS);
-            } else {
-                r.setWriteStatus(AppStatus.PROGRESS);
+            switch (batch.getJobType()) {
+                case WORK_APPROVAL    -> r.setWorkStatus(AppStatus.PROGRESS);
+                case MANAGER_APPROVAL -> r.setApprovalStatus(AppStatus.PROGRESS);
+                default               -> r.setWriteStatus(AppStatus.PROGRESS);
             }
         }));
 
@@ -1141,6 +1300,161 @@ public class ExcelWorkServiceImpl {
                     .build());
 
             // detach된 엔티티 재병합 (실패 경로)
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
+        }
+
+        int processed = batch.getSuccessCount() + batch.getFailCount();
+        if (processed >= batch.getTotalCount()) {
+            finalizeBatch(batch);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 12. callbackManagerApprovalItemDone — 기술책임자결재 단건 완료 콜백
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 미들웨어가 기술책임자결재 1건 처리 완료 후 signed.xlsx + signed.pdf 와 함께 호출.
+     *
+     * 처리 순서:
+     *  1. item 조회 + token → batch 검증 + MANAGER_APPROVAL 타입 확인
+     *  2. 기존 signed_xlsx / signed_pdf file_info 소프트삭제
+     *  3. signed.xlsx → 스토리지 {rootDir}/report/{reportId}/signed.xlsx 업로드
+     *  4. signed.pdf  → 스토리지 {rootDir}/report/{reportId}/signed.pdf  업로드
+     *  5. file_info 2건 신규 등록
+     *  6. item status → SUCCESS + endDatetime
+     *  7. Report.approvalStatus → SUCCESS (approvalDatetime은 배치 생성 시 이미 설정됨)
+     *  8. batch.successCount++ + 전체 완료 여부 확인
+     */
+    @Transactional
+    public void callbackManagerApprovalItemDone(String token, Long itemId,
+                                                MultipartFile xlsxFile, MultipartFile pdfFile) {
+        ReportJobBatch batch = findBatchByToken(token);
+
+        if (batch.getJobType() != com.bada.cali.common.enums.JobType.MANAGER_APPROVAL) {
+            throw new IllegalArgumentException(
+                    "MANAGER_APPROVAL 배치가 아닙니다. (batchId: " + batch.getId() + ")");
+        }
+
+        ReportJobItem item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new EntityNotFoundException("item을 찾을 수 없습니다. (id: " + itemId + ")"));
+
+        if (!item.getBatchId().equals(batch.getId())) {
+            throw new IllegalArgumentException(
+                    "token의 배치와 item의 배치가 일치하지 않습니다.");
+        }
+
+        Report report = reportRepository.findById(item.getReportId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "성적서를 찾을 수 없습니다. (id: " + item.getReportId() + ")"));
+
+        LocalDateTime now = LocalDateTime.now();
+        String bucket   = storageProps.getBucketName();
+        String rootDir  = storageProps.getRootDir();
+        String CT_XLSX  = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        String CT_PDF   = "application/pdf";
+        String reportDir = "report/" + report.getId() + "/";
+
+        try {
+            // ── 기존 signed 파일 file_info 소프트삭제 ─────────────────────────
+            fileInfoRepository.softDeleteByRefAndNames(
+                    "report", report.getId(),
+                    java.util.List.of("signed_xlsx", "signed_pdf"),
+                    com.bada.cali.common.enums.YnType.n,
+                    now,
+                    batch.getRequestMemberId()
+            );
+
+            // ── signed.xlsx 업로드 ────────────────────────────────────────────
+            String xlsxKey = rootDir + "/report/" + report.getId() + "/signed.xlsx";
+            try (InputStream is = xlsxFile.getInputStream()) {
+                ncloudS3Client.putObject(
+                        PutObjectRequest.builder()
+                                .bucket(bucket).key(xlsxKey)
+                                .acl(ObjectCannedACL.PUBLIC_READ)
+                                .contentType(CT_XLSX)
+                                .build(),
+                        RequestBody.fromInputStream(is, xlsxFile.getSize())
+                );
+            }
+            fileInfoRepository.save(FileInfo.builder()
+                    .refTableName("report").refTableId(report.getId())
+                    .originName("signed.xlsx").name("signed_xlsx").extension("xlsx")
+                    .fileSize(xlsxFile.getSize()).contentType(CT_XLSX)
+                    .dir(reportDir).isVisible(com.bada.cali.common.enums.YnType.y)
+                    .createDatetime(now).createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            // ── signed.pdf 업로드 ─────────────────────────────────────────────
+            String pdfKey = rootDir + "/report/" + report.getId() + "/signed.pdf";
+            try (InputStream is = pdfFile.getInputStream()) {
+                ncloudS3Client.putObject(
+                        PutObjectRequest.builder()
+                                .bucket(bucket).key(pdfKey)
+                                .acl(ObjectCannedACL.PUBLIC_READ)
+                                .contentType(CT_PDF)
+                                .build(),
+                        RequestBody.fromInputStream(is, pdfFile.getSize())
+                );
+            }
+            fileInfoRepository.save(FileInfo.builder()
+                    .refTableName("report").refTableId(report.getId())
+                    .originName("signed.pdf").name("signed_pdf").extension("pdf")
+                    .fileSize(pdfFile.getSize()).contentType(CT_PDF)
+                    .dir(reportDir).isVisible(com.bada.cali.common.enums.YnType.y)
+                    .createDatetime(now).createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            log.info("기술책임자결재 파일 업로드 완료 — reportId: {}, xlsxKey: {}, pdfKey: {}",
+                    report.getId(), xlsxKey, pdfKey);
+
+            // ── item / report / batch 상태 업데이트 ───────────────────────────
+            // approvalDatetime은 createManagerApprovalJob 시 이미 설정됨 — 갱신하지 않음
+            item.setStatus(JobItemStatus.SUCCESS);
+            item.setEndDatetime(now);
+            report.setApprovalStatus(AppStatus.SUCCESS);
+            batch.setSuccessCount(batch.getSuccessCount() + 1);
+
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 기술책임자결재 완료 — reportId: %d, 성적서번호: %s, batchId: %d",
+                            report.getId(), report.getReportNum(), batch.getId()))
+                    .logType("u")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            // ── detach된 엔티티 재병합 ─────────────────────────────────────────
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
+
+        } catch (Exception e) {
+            log.error("callbackManagerApprovalItemDone 처리 실패 — itemId: {}, reportId: {}: {}",
+                    itemId, report.getId(), e.getMessage(), e);
+            item.setStatus(JobItemStatus.FAIL);
+            item.setMessage(e.getMessage());
+            item.setEndDatetime(now);
+            report.setApprovalStatus(AppStatus.FAIL);
+            batch.setFailCount(batch.getFailCount() + 1);
+
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 기술책임자결재 실패 — reportId: %d, 성적서번호: %s, 오류: %s",
+                            report.getId(), report.getReportNum(), e.getMessage()))
+                    .logType("e")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+
             reportRepository.save(report);
             itemRepository.save(item);
             batch = batchRepository.save(batch);

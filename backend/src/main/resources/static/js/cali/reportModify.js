@@ -103,6 +103,12 @@
 						// 수리/불가/초기화 버튼 색상 초기 적용
 						$modal.reportStatus = parentInfo.reportStatus;
 						updateStatusButtons(parentInfo.reportStatus);
+						// 실무자 결재 완료(workStatus=SUCCESS) 시 수리/불가 버튼 비활성화
+						if (parentInfo.workStatus === 'SUCCESS') {
+							$modal_root.find('.modal-btn-repair, .modal-btn-impossible')
+								.prop('disabled', true)
+								.attr('title', '실무자 결재 완료 상태에서는 수리/불가 처리가 불가능합니다.');
+						}
 						// 중분류코드 기준으로 실무자/기술책임자 option 세팅 및 기존 선택값 복원
 						await $modal.loadMemberOptions(
 							parentInfo.middleItemCodeId,

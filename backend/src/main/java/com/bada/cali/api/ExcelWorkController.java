@@ -117,6 +117,42 @@ public class ExcelWorkController {
     }
 
     /**
+     * 기술책임자결재 작업 요청 — createManagerApprovalJob.
+     *
+     * 브라우저에서 결재 대상 성적서를 선택하고 결재일자를 입력한 뒤 호출.
+     * 응답의 excelworkUri를 window.location.href로 실행하면
+     * ExcelWorkApp이 기동되어 기술책임자 서명 삽입 + QR코드 삽입 + PDF 변환을 처리한다.
+     *
+     * 결재일자는 배치 생성 시 report.approvalDatetime에 미리 저장되고,
+     * 콜백(manager-approval-item-done) 시에는 approvalStatus=SUCCESS만 업데이트된다.
+     */
+    @Operation(
+            summary = "기술책임자결재 작업 요청 (ExcelWork)",
+            description = "결재 대상 성적서 id 목록과 결재일자를 받아 MANAGER_APPROVAL 배치를 생성하고 미들웨어 실행 URI를 반환. " +
+                    "결재일자(approvalDate)는 배치 생성 시 report.approvalDatetime에 선반영됨. " +
+                    "응답의 excelworkUri(excelwork://...)를 브라우저에서 실행하면 ExcelWorkApp이 서명 삽입 + QR코드 + PDF 변환을 처리함"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "배치 생성 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류, 유효하지 않은 성적서, 또는 기술책임자 서명 이미지 없음",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 성적서",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/batches/manager-approval")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.CreateJobRes>> createManagerApprovalJob(
+            @Valid @RequestBody ExcelWorkDTO.CreateManagerApprovalJobReq req,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        ExcelWorkDTO.CreateJobRes res = excelWorkService.createManagerApprovalJob(req, user.getId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new ResMessage<>(1, String.format(
+                        "기술책임자결재 작업이 준비되었습니다. (%d건)", res.totalCount()), res));
+    }
+
+    /**
      * 비정상 종료 복구 — 고착 배치 초기화.
      *
      * READY/PROGRESS 상태로 고착된 배치를 CANCELED 로 전환하고
@@ -404,6 +440,47 @@ public class ExcelWorkController {
         }
         excelWorkService.callbackApprovalItemDone(token, itemId, xlsxFile, pdfFile);
         return ResponseEntity.ok(new ResMessage<>(1, "실무자결재 item 완료 처리 성공", null));
+    }
+
+    /**
+     * 기술책임자결재 item-done 콜백 — signed.xlsx + signed.pdf 두 파일을 함께 수신.
+     *
+     * 두 파일을 스토리지에 업로드하고 file_info를 교체한 뒤
+     * item/Report 상태를 SUCCESS 로 갱신.
+     * approvalDatetime은 배치 생성 시 이미 설정되어 있으므로 갱신하지 않음.
+     * 인증: X-Callback-Key 헤더.
+     */
+    @Operation(
+            summary = "기술책임자결재 item 완료 콜백 (미들웨어→서버, multipart)",
+            description = "미들웨어가 기술책임자결재 1건 완료 후 signed.xlsx + signed.pdf 와 함께 호출. " +
+                    "두 파일을 스토리지에 업로드하고 file_info를 교체한 뒤 approvalStatus=SUCCESS 로 갱신. " +
+                    "approvalDatetime은 배치 생성 시 이미 반영된 값을 유지. 세션 인증 불필요, X-Callback-Key 인증"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "파일 업로드 및 상태 갱신 성공"),
+            @ApiResponse(responseCode = "400", description = "파일 누락 또는 파라미터 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "유효하지 않은 token 또는 itemId",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/callback/manager-approval-item-done")
+    public ResponseEntity<ResMessage<Void>> callbackManagerApprovalItemDone(
+            @RequestParam String token,
+            @RequestParam Long itemId,
+            @RequestPart MultipartFile xlsxFile,
+            @RequestPart MultipartFile pdfFile,
+            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+    ) {
+        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(new ResMessage<>(-1, "유효하지 않은 콜백 키입니다.", null));
+        }
+        excelWorkService.callbackManagerApprovalItemDone(token, itemId, xlsxFile, pdfFile);
+        return ResponseEntity.ok(new ResMessage<>(1, "기술책임자결재 item 완료 처리 성공", null));
     }
 
     /**
