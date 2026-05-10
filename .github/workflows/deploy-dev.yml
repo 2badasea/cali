@@ -33,6 +33,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ── STEP 0: GitHub Actions 러너를 Tailscale 네트워크에 참여시킴 ──
+      # 이 스텝이 완료되면 러너에서 홈서버 Tailscale IP(100.x.x.x)로 SSH 접근 가능해짐
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret:    ${{ secrets.TS_OAUTH_SECRET }}
+          tags:            tag:ci
+
       # ── STEP 1: 홈서버 — 코드 업데이트 및 Docker Compose 재배포 ──
       # 빌드(Gradle + npm)는 홈서버 위에서 docker compose --build 로 수행
       # (멀티스테이지 Dockerfile이 Gradle 빌드와 npm 빌드를 단계별로 처리)
