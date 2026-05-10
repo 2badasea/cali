@@ -23,4 +23,9 @@ public interface MemberPermissionReadRepository extends JpaRepository<MemberPerm
 	@Query("DELETE FROM MemberPermissionRead mpr WHERE mpr.member.id = :memberId")
 	void deleteAllByMemberId(@Param("memberId") Long memberId);
 
+	// 특정 메뉴에 대한 모든 읽기 권한 삭제 (메뉴 삭제 시 고아 권한 데이터 정리용)
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("DELETE FROM MemberPermissionRead mpr WHERE mpr.menu.id = :menuId")
+	void deleteAllByMenuId(@Param("menuId") Long menuId);
+
 }

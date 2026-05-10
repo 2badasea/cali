@@ -235,5 +235,21 @@ public class ReportController {
 		return ResponseEntity.ok(reportService.updateReportStatus(id, req.getNewStatus(), user));
 	}
 
+	@Operation(summary = "성적서대기변경",
+			description = "실무자 결재 완료(workStatus=SUCCESS) 상태인 성적서를 대기(IDLE) 상태로 초기화하여 재결재 가능 상태로 전환함. " +
+					"기술책임자 결재가 진행 중(PROGRESS)이거나 완료(SUCCESS)된 경우 변경 불가. " +
+					"하나라도 부적합한 성적서가 포함되면 전체 처리 중단하고 부적합 목록 반환.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "대기변경 성공 또는 검증 실패 목록 반환 (code=-1)"),
+			@ApiResponse(responseCode = "400", description = "요청 파라미터 오류"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PatchMapping("/resetWorkStatus")
+	public ResponseEntity<ResMessage<?>> resetWorkStatus(
+			@Valid @RequestBody ReportDTO.ResetWorkStatusReq req,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		return ResponseEntity.ok(reportService.resetWorkStatus(req.reportIds(), user));
+	}
 
 }

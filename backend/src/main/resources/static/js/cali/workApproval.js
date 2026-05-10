@@ -835,9 +835,87 @@ $(function () {
 			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 			$modal.grid.getPagination().movePageTo(currentPage);
 		})
-		// 버튼: 성적서대기변경 (준비중)
-		.on('click', '.btnWaitChange', function () {
-			gToast('구현 준비중입니다.', 'info');
+		// 버튼: 성적서대기변경
+		// 실무자 결재 완료(workStatus=SUCCESS) + 기술책임자 결재 미착수(approvalStatus=IDLE) 인 성적서를 대기(IDLE)로 초기화
+		// 1차: 스크립트 검증 (조건 불일치 시 SweetAlert 안내), 2차: 서버 재검증 후 일괄 update
+		.on('click', '.btnWaitChange', async function () {
+			const checkedRows = $modal.grid.getCheckedRows();
+			if (!checkedRows || checkedRows.length === 0) {
+				gToast('리스트에서 항목을 선택해 주세요.', 'warning');
+				return;
+			}
+
+			// ── 1차 스크립트 검증 ────────────────────────────────────────────────
+			// workStatus=SUCCESS, approvalStatus=IDLE 이어야 대기변경 가능
+			const invalidRows = checkedRows.filter(row =>
+				row.workStatus !== 'SUCCESS'
+				|| row.approvalStatus === 'PROGRESS'
+				|| row.approvalStatus === 'SUCCESS'
+			);
+
+			if (invalidRows.length > 0) {
+				const listHtml = invalidRows.map(row => {
+					let reason;
+					if (row.workStatus !== 'SUCCESS') {
+						reason = '실무자 결재 완료 상태가 아닙니다.';
+					} else if (row.approvalStatus === 'PROGRESS') {
+						reason = '기술책임자 결재가 진행 중입니다.';
+					} else {
+						reason = '기술책임자 결재가 이미 완료된 성적서입니다.';
+					}
+					return `<li><strong>${row.reportNum ?? row.id}</strong>: ${reason}</li>`;
+				}).join('');
+				await gMessage(
+					'대기변경 불가',
+					`<ul class="text-start" style="max-height:200px; overflow-y:auto; font-size:0.85em;">${listHtml}</ul>`,
+					'error', 'alert'
+				);
+				return;
+			}
+
+			// ── 최종 확인 다이얼로그 ─────────────────────────────────────────────
+			const reportIds = checkedRows.map(row => row.id);
+			const confirmResult = await gMessage(
+				'성적서대기변경',
+				`${checkedRows.length}건의 실무자결재를 취소하고 대기 상태로 변경하시겠습니까?`,
+				'question', 'confirm',
+				{ confirmButtonText: '대기변경' }
+			);
+			if (!confirmResult.isConfirmed) return;
+
+			// ── 서버 요청 (2차 검증 + 일괄 update) ──────────────────────────────
+			try {
+				gLoadingMessage('처리 중...');
+				const res = await fetch('/api/report/resetWorkStatus', {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json; charset=utf-8' },
+					body: JSON.stringify({ reportIds }),
+				});
+				swal.close();
+				if (!res.ok) throw res;
+				const data = await res.json();
+
+				if (data?.code > 0) {
+					await gMessage('대기변경 완료', data.msg ?? '대기상태로 변경되었습니다.', 'success', 'alert');
+					const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
+					$modal.grid.getPagination().movePageTo(currentPage);
+				} else if (data?.code === -1 && data?.data?.invalid?.length > 0) {
+					// 서버 2차 검증 실패 — 불가 항목 목록 표시
+					const failHtml = data.data.invalid.map(i =>
+						`<li><strong>${i.reportNum ?? i.id}</strong>: ${i.reason}</li>`
+					).join('');
+					await gMessage(
+						'대기변경 불가',
+						`<ul class="text-start" style="max-height:200px; overflow-y:auto; font-size:0.85em;">${failHtml}</ul>`,
+						'error', 'alert'
+					);
+				} else {
+					await gMessage('오류', data?.msg ?? '처리 중 오류가 발생했습니다.', 'error', 'alert');
+				}
+			} catch (err) {
+				swal.close();
+				await gApiErrorHandler(err);
+			}
 		})
 		// 버튼: 통합수정
 		// 1) 체크된 항목 없으면 warning

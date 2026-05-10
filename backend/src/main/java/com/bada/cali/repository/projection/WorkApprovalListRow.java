@@ -39,6 +39,8 @@ public interface WorkApprovalListRow {
 
 	String getWorkStatus();          // 실무자 결재상태 (String — native query)
 
+	String getApprovalStatus();      // 기술책임자 결재상태 (String — native query)
+
 	String getOrderType();           // 접수구분 (String — native query)
 
 	String getWriteMemberName();     // 작성자 이름 (member.name JOIN)

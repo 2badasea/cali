@@ -603,12 +603,18 @@ class StatusChangeCellRenderer {
 }
 
 // 기술책임자결재: '결재자' 열 렌더러
-// - approval_status !== 'SUCCESS': '반려' 버튼(btn-danger) + '확인' 버튼(btn-primary) 표시
+// - approval_status !== 'SUCCESS': '반려' 버튼(btn-danger) + '확인' 버튼(btn-primary) 좌우 배치
 // - approval_status === 'SUCCESS': 기술책임자 이름 + (개행) 결재일시 텍스트 표시
+//
+// [주의] TUI Grid 셀 내부 클릭은 Grid 자체가 이벤트를 가로채므로
+//         jQuery 이벤트 위임($(...).on)이 신뢰할 수 없음.
+//         WorkApprovalCellRenderer와 동일하게 window.onManagerReject / window.onManagerApprove를
+//         직접 호출하는 방식으로 구현해야 클릭이 확실히 동작한다.
 class ManagerApprovalCellRenderer {
 	constructor(props) {
 		this.el = document.createElement('div');
-		this.el.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:2px; padding:2px 0; width:100%;';
+		// flex-direction:row 로 반려/확인 버튼을 좌우 배치
+		this.el.style.cssText = 'display:flex; flex-direction:row; align-items:center; justify-content:center; gap:4px; width:100%; height:100%; min-height:28px;';
 		this.render(props);
 	}
 
@@ -618,25 +624,44 @@ class ManagerApprovalCellRenderer {
 
 		const { approvalStatus, approvalMemberName, approvalDatetime, id: reportId } = row;
 
+		this.el.innerHTML = '';
+
 		if (approvalStatus === 'SUCCESS') {
-			// 결재 완료: 이름 + 결재일시 표시
+			// 결재 완료: 이름 + 결재일시 표시 (세로 배치용 wrapper)
 			const dateStr = approvalDatetime
 				? String(approvalDatetime).replace('T', ' ').substring(0, 16)
 				: '';
-			this.el.innerHTML =
+			const wrapper = document.createElement('div');
+			wrapper.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:1px;';
+			wrapper.innerHTML =
 				`<span style="font-size:12px; font-weight:500;">${approvalMemberName ?? ''}</span>` +
 				`<span style="font-size:11px; color:#666;">${dateStr}</span>`;
+			this.el.appendChild(wrapper);
 		} else {
-			// 미결재: 반려 + 확인 버튼
-			this.el.innerHTML =
-				`<button type="button" class="btn btn-sm btn-danger btn-manager-reject" ` +
-					`data-id="${reportId}" style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">반려</button>` +
-				`<button type="button" class="btn btn-sm btn-primary btn-manager-approve" ` +
-					`data-id="${reportId}" style="font-size:11px; padding:1px 8px; line-height:1.4; width:52px;">확인</button>`;
+			// 미결재: 반려 버튼 (좌) + 확인 버튼 (우)
+			// window.onManagerReject / window.onManagerApprove 는 managerApproval.js 에서 노출
+			const btnReject = document.createElement('button');
+			btnReject.type = 'button';
+			btnReject.className = 'btn btn-sm btn-danger';
+			btnReject.style.cssText = 'font-size:11px; padding:1px 8px; line-height:1.4; width:52px;';
+			btnReject.textContent = '반려';
+			btnReject.addEventListener('click', (e) => {
+				e.stopPropagation();
+				if (typeof window.onManagerReject === 'function') window.onManagerReject(reportId);
+			});
 
-			this.el.querySelectorAll('button').forEach(btn =>
-				btn.addEventListener('click', e => e.stopPropagation())
-			);
+			const btnApprove = document.createElement('button');
+			btnApprove.type = 'button';
+			btnApprove.className = 'btn btn-sm btn-primary';
+			btnApprove.style.cssText = 'font-size:11px; padding:1px 8px; line-height:1.4; width:52px;';
+			btnApprove.textContent = '확인';
+			btnApprove.addEventListener('click', (e) => {
+				e.stopPropagation();
+				if (typeof window.onManagerApprove === 'function') window.onManagerApprove(reportId);
+			});
+
+			this.el.appendChild(btnReject);
+			this.el.appendChild(btnApprove);
 		}
 	}
 
@@ -685,6 +710,8 @@ class WorkApprovalCellRenderer {
 	}
 
 	render(props) {
+		this.el.innerHTML = '';  // 재호출 시 누적 방지
+
 		const row       = props.grid.getRow(props.rowKey);
 		const hasOrigin = !!(row && row.originFileId);
 		const reportId  = row?.id;

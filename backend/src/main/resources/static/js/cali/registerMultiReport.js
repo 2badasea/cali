@@ -199,10 +199,11 @@
 				},
 			],
 			editingEvent: 'click', // 원클릭으로 수정할 수 있도록 변경
+			pageOptions: false, // 페이지네이션 비활성화 (스크롤 방식)
 			rowHeaders: ['checkbox'],
-			minBodyHeight: 650,
+			minBodyHeight: 600,
 			useClientSort: false,
-			bodyHeight: 650,
+			bodyHeight: 600,
 			// draggable: true,
 			treeColumnOptions: {
 				name: 'addChild', // 해당 열 클릭 시 트리구조가 생성된다.

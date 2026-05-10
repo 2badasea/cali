@@ -654,8 +654,13 @@ public class ReportJobBatchServiceImpl {
             }
             if (report.getWorkStatus() == com.bada.cali.common.enums.AppStatus.READY
                     || report.getWorkStatus() == com.bada.cali.common.enums.AppStatus.PROGRESS) {
-                invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "이미 실무자결재가 진행 중인 성적서입니다."));
-                continue;
+                // 실제 활성 배치가 있을 때만 차단 — 없으면 고착 상태로 간주하여 valid 통과
+                // (createWorkApprovalJob 에서 자동 리셋 후 재배치)
+                boolean hasActiveBatch = itemRepository.existsActiveBatchForReport(id, "WORK_APPROVAL");
+                if (hasActiveBatch) {
+                    invalid.add(new ReportJobBatchDTO.InvalidItem(id, num, "이미 실무자결재가 진행 중인 성적서입니다."));
+                    continue;
+                }
             }
             if (report.getApprovalStatus() == com.bada.cali.common.enums.AppStatus.READY
                     || report.getApprovalStatus() == com.bada.cali.common.enums.AppStatus.PROGRESS

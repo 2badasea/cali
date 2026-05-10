@@ -31,6 +31,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @Log4j2
@@ -984,6 +985,76 @@ public class ReportServiceImpl {
 	/** null이거나 공백인 경우 false 반환 */
 	private boolean hasValue(String val) {
 		return val != null && !val.isBlank();
+	}
+
+	/**
+	 * 성적서대기변경: 실무자 결재 완료(workStatus=SUCCESS) 상태를 대기(IDLE)로 초기화
+	 *
+	 * 조건: workStatus=SUCCESS + approvalStatus=IDLE 인 성적서만 허용
+	 * 기술책임자 결재가 진행 중(PROGRESS)이거나 완료(SUCCESS)된 경우 전체 중단
+	 * workMemberId는 유지, workStatus·workDatetime만 초기화
+	 */
+	@Transactional
+	public ResMessage<ReportDTO.ResetWorkStatusRes> resetWorkStatus(List<Long> reportIds, CustomUserDetails user) {
+		List<Report> reports = reportRepository.findAllById(reportIds);
+
+		// 요청 ID 중 실제로 존재하지 않는 건 검출
+		Set<Long> foundIds = reports.stream().map(Report::getId).collect(Collectors.toSet());
+		List<ReportDTO.InvalidReportItem> invalids = new ArrayList<>();
+		for (Long reqId : reportIds) {
+			if (!foundIds.contains(reqId)) {
+				invalids.add(new ReportDTO.InvalidReportItem(reqId, null, "성적서를 찾을 수 없습니다."));
+			}
+		}
+
+		// 상태 검증: workStatus=SUCCESS + approvalStatus=IDLE 만 허용
+		for (Report report : reports) {
+			if (report.getWorkStatus() != AppStatus.SUCCESS) {
+				invalids.add(new ReportDTO.InvalidReportItem(
+						report.getId(), report.getReportNum(),
+						"실무자 결재 완료 상태가 아닙니다. (현재: " + report.getWorkStatus() + ")"
+				));
+			} else if (report.getApprovalStatus() == AppStatus.PROGRESS) {
+				invalids.add(new ReportDTO.InvalidReportItem(
+						report.getId(), report.getReportNum(),
+						"기술책임자 결재가 진행 중입니다."
+				));
+			} else if (report.getApprovalStatus() == AppStatus.SUCCESS) {
+				invalids.add(new ReportDTO.InvalidReportItem(
+						report.getId(), report.getReportNum(),
+						"기술책임자 결재가 이미 완료된 성적서입니다."
+				));
+			}
+		}
+
+		// 한 건이라도 검증 실패 시 전체 중단
+		if (!invalids.isEmpty()) {
+			return new ResMessage<>(-1, "대기변경 불가 항목이 있습니다.", new ReportDTO.ResetWorkStatusRes(invalids));
+		}
+
+		LocalDateTime now = LocalDateTime.now();
+		Long userId = user.getId();
+
+		// 일괄 초기화: workStatus → IDLE, workDatetime → null (workMemberId 유지)
+		for (Report report : reports) {
+			report.setWorkStatus(AppStatus.IDLE);
+			report.setWorkDatetime(null);
+			report.setUpdateMemberId(userId);
+		}
+
+		List<Long> changedIds = reports.stream().map(Report::getId).toList();
+		Log statusLog = Log.builder()
+				.logType("u")
+				.createMemberId(userId)
+				.createDatetime(now)
+				.workerName(user.getName())
+				.refTableId(changedIds.get(0))
+				.refTable("report")
+				.logContent(String.format("[성적서대기변경] 고유번호 - %s", changedIds))
+				.build();
+		logRepository.save(statusLog);
+
+		return new ResMessage<>(1, "성적서 " + reports.size() + "건이 대기상태로 변경되었습니다.", null);
 	}
 
 	/**

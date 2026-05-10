@@ -7,6 +7,7 @@ const menus = [
   // { to: "/monitoring-estimate", label: "모니터링(견적)" },     // TODO: 추후 구현 예정
   { to: "/notices", label: "업데이트공지" },
   { to: "/company-info", label: "회사정보" },
+  { to: "/menu-management", label: "메뉴관리" },
 ];
 
 const backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;

@@ -552,7 +552,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.work_status       = 'SUCCESS'
 			  AND (
 			      (:approvalStatus IS NOT NULL AND r.approval_status = :approvalStatus)
-			      OR (:approvalStatus IS NULL AND r.approval_status != 'SUCCESS')
+			      OR (:approvalStatus IS NULL AND r.approval_status NOT IN ('FAIL', 'SUCCESS'))
 			  )
 			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
 			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
@@ -616,7 +616,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.work_status       = 'SUCCESS'
 			  AND (
 			      (:approvalStatus IS NOT NULL AND r.approval_status = :approvalStatus)
-			      OR (:approvalStatus IS NULL AND r.approval_status != 'SUCCESS')
+			      OR (:approvalStatus IS NULL AND r.approval_status NOT IN ('FAIL', 'SUCCESS'))
 			  )
 			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
 			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)

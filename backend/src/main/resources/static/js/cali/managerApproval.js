@@ -68,7 +68,7 @@ $(function () {
 	//
 	// 처리 흐름:
 	//   1. 결재 불가 케이스 사전 검증 (approval_status 기준)
-	//   2. SweetAlert2 + jQuery UI datepicker 로 결재일자 선택
+	//   2. SweetAlert2 + 네이티브 input[type="date"] 로 결재일자 선택
 	//   3. POST /api/excelwork/batches/manager-approval 호출
 	//   4. excelworkUri 로 ExcelWorkApp 기동, 그리드 갱신
 	// =====================================================================
@@ -88,34 +88,24 @@ $(function () {
 			return;
 		}
 
-		// 결재일자 선택 SweetAlert2 (기존 의존성 jQuery UI datepicker 사용)
+		// 결재일자 선택 SweetAlert2
+		// jQuery UI datepicker는 SweetAlert2 backdrop이 클릭을 차단하여 달력이 보이지 않는 버그가 있음.
+		// 네이티브 input[type="date"]는 브라우저 자체 UI를 사용하므로 SweetAlert2 DOM에 무관하게 정상 동작.
+		// 반환 값 형식이 'yyyy-MM-dd' 로 백엔드 파싱 포맷(LocalDate.parse)과 바로 호환됨.
 		const { isConfirmed, value: approvalDate } = await Swal.fire({
 			title: '결재일자 선택',
-			html: '<input type="text" id="swalApprovalDate" class="swal2-input"'
-				+ ' placeholder="날짜를 선택하세요" readonly style="cursor:pointer;">',
+			html: '<input type="date" id="swalApprovalDate" class="swal2-input" style="width: auto;">',
 			confirmButtonText: '결재',
 			cancelButtonText: '취소',
 			showCancelButton: true,
 			focusConfirm: false,
-			didOpen: () => {
-				// z-index 조정: jQuery UI datepicker 달력이 SweetAlert2 위에 표시되도록
-				$('#swalApprovalDate').datepicker({
-					dateFormat: 'yy-mm-dd',
-					beforeShow: (input, inst) => {
-						setTimeout(() => { inst.dpDiv.css('z-index', 99999); }, 0);
-					},
-				});
-			},
 			preConfirm: () => {
-				const date = $('#swalApprovalDate').val().trim();
+				const date = document.getElementById('swalApprovalDate').value;
 				if (!date) {
 					Swal.showValidationMessage('결재일자를 선택해주세요.');
 					return false;
 				}
 				return date;
-			},
-			willClose: () => {
-				try { $('#swalApprovalDate').datepicker('destroy'); } catch (e) { /* ignore */ }
 			},
 		});
 
@@ -297,12 +287,24 @@ $(function () {
 				className: 'cursor_pointer',
 			},
 			{
-				// 추후 기능 정의 예정, 현재 빈값 표시
+				// approvalStatus 기반 진행 상태 텍스트 표시
+				// '결재자' 컬럼 렌더러는 IDLE/READY/PROGRESS를 모두 동일하게 버튼으로 표시하므로
+				// 이 컬럼에서 텍스트+색상으로 세분화하여 ExcelWork 처리 중 여부를 구분
 				header: '진행',
 				name: 'progress',
-				width: 60,
+				width: 65,
 				align: 'center',
-				formatter: () => '',
+				formatter: function (data) {
+					const configs = {
+						IDLE:     { label: '대기',   color: '#6c757d' },
+						READY:    { label: '준비중', color: '#0d6efd' },
+						PROGRESS: { label: '처리중', color: '#fd7e14' },
+						SUCCESS:  { label: '완료',   color: '#198754' },
+					};
+					const cfg = configs[data.row.approvalStatus];
+					if (!cfg) return '';
+					return `<span style="color:${cfg.color}; font-weight:600;">${cfg.label}</span>`;
+				},
 			},
 			{
 				header: '원본',
@@ -466,10 +468,10 @@ $(function () {
 
 	// =====================================================================
 	// '결재자' 열 — 반려 버튼 (단건)
+	// gridClass.js ManagerApprovalCellRenderer에서 직접 호출
+	// (TUI Grid 셀 내부 클릭은 jQuery 위임이 신뢰할 수 없으므로 window 함수로 노출)
 	// =====================================================================
-	$('.managerApprovalList').on('click', '.btn-manager-reject', async function (e) {
-		e.stopPropagation();
-		const reportId = $(this).data('id');
+	window.onManagerReject = async function (reportId) {
 		const row = $modal.grid.getData().find(r => r.id === reportId);
 		const reportNum = row?.reportNum ?? '';
 
@@ -485,19 +487,18 @@ $(function () {
 			}
 		);
 		$modal.grid.getPagination().movePageTo(currentPage);
-	});
+	};
 
 	// =====================================================================
 	// '결재자' 열 — 확인(결재) 버튼 (단건)
+	// gridClass.js ManagerApprovalCellRenderer에서 직접 호출
 	// =====================================================================
-	$('.managerApprovalList').on('click', '.btn-manager-approve', async function (e) {
-		e.stopPropagation();
-		const reportId = $(this).data('id');
+	window.onManagerApprove = async function (reportId) {
 		const row = $modal.grid.getData().find(r => r.id === reportId);
 		if (!row) return;
 		await doApprove([row]);
 		$modal.grid.getPagination().movePageTo(currentPage);
-	});
+	};
 
 	// =====================================================================
 	// '취소' 열 — 취소 버튼 (단건)
@@ -657,6 +658,120 @@ $(function () {
 		window.location.href = `/api/admin/managerApproval/download?ids=${ids}&fileType=${fileType}`;
 		setTimeout(() => swal.close(), 2000);
 	}
+
+	// =====================================================================
+	// 비정상종료복구 버튼 — 기술책임자결재 비정상종료 스마트 복구
+	// approvalStatus=READY/PROGRESS 인 항목 대상, signed 파일 존재 여부 기준 복구
+	// =====================================================================
+	$modal.on('click', '.btnRecoverApproval', async function () {
+		const checkedRows = $modal.grid.getCheckedRows();
+		if (!checkedRows || checkedRows.length === 0) {
+			gToast('리스트에서 항목을 선택해 주세요.', 'warning');
+			return;
+		}
+
+		// 복구 대상: approvalStatus = READY 또는 PROGRESS (SUCCESS는 이미 완료)
+		const targetRows = checkedRows.filter(r =>
+			r.approvalStatus === 'READY' || r.approvalStatus === 'PROGRESS'
+		);
+		if (targetRows.length === 0) {
+			gToast('복구 대상 항목이 없습니다. (결재준비중/결재진행중 상태만 복구 가능)', 'warning');
+			return;
+		}
+
+		const reportIds = targetRows.map(r => r.id);
+
+		try {
+			// ── Step 1. 스토리지 파일 존재 여부 미리 확인 ─────────────────────
+			gLoadingMessage('스토리지 파일 확인 중...');
+
+			const params = new URLSearchParams();
+			reportIds.forEach(id => params.append('reportIds', id));
+			const previewRes = await fetch(`/api/excelwork/manager-recover-preview?${params.toString()}`);
+			swal.close();
+			if (!previewRes.ok) throw previewRes;
+			const previewData = await previewRes.json();
+			if (!previewData || previewData.code <= 0) {
+				await gMessage('오류', previewData?.msg ?? '미리보기 조회 중 오류가 발생했습니다.', 'error', 'alert');
+				return;
+			}
+
+			const { successItems, idleItems } = previewData.data;
+
+			if (successItems.length === 0 && idleItems.length === 0) {
+				await gMessage('알림', '복구할 항목이 없습니다.<br><small class="text-muted">선택된 성적서가 모두 이미 완료 상태입니다.</small>', 'info', 'alert');
+				return;
+			}
+
+			// ── Step 2. 예상 결과 미리보기 확인 다이얼로그 ────────────────────
+			let htmlContent = '<div class="text-start">';
+
+			if (successItems.length > 0) {
+				const nums = successItems.map(i => {
+					const label = i.reportNum ?? `#${i.reportId}`;
+					const elapsed = i.batchStartedMinutesAgo != null
+						? ` <span class="text-muted small">(${i.batchStartedMinutesAgo}분 전 시작)</span>`
+						: '';
+					return `<li>${label}${elapsed}</li>`;
+				}).join('');
+				htmlContent += `
+					<p class="mb-1 fw-bold text-success">✔ 완료 처리 (파일 확인됨) — ${successItems.length}건</p>
+					<ul class="mb-3 small">${nums}</ul>`;
+			}
+
+			if (idleItems.length > 0) {
+				const nums = idleItems.map(i => {
+					const label = i.reportNum ?? `#${i.reportId}`;
+					const elapsed = i.batchStartedMinutesAgo != null
+						? ` <span class="text-muted small">(${i.batchStartedMinutesAgo}분 전 시작)</span>`
+						: '';
+					return `<li>${label}${elapsed}</li>`;
+				}).join('');
+				htmlContent += `
+					<p class="mb-1 fw-bold text-warning">↩ 초기화 (파일 없음) — ${idleItems.length}건</p>
+					<ul class="mb-3 small">${nums}</ul>`;
+			}
+
+			htmlContent += `
+				<div class="alert alert-warning small mb-0 p-2">
+					⚠ ExcelWork 앱이 현재 실행 중이라면 진행 중인 작업이 강제로 중단됩니다.
+				</div>
+			</div>`;
+
+			const confirmResult = await gMessage(
+				'비정상종료복구',
+				htmlContent,
+				'question', 'confirm',
+				{ confirmButtonText: '복구 실행', cancelButtonText: '취소' }
+			);
+			if (!confirmResult.isConfirmed) return;
+
+			// ── Step 3. 복구 실행 ──────────────────────────────────────────────
+			gLoadingMessage('복구 처리 중...');
+			const recoverRes = await fetch('/api/excelwork/manager-smart-recover', {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: JSON.stringify({ reportIds }),
+			});
+			swal.close();
+			if (!recoverRes.ok) throw recoverRes;
+			const recoverData = await recoverRes.json();
+
+			if (recoverData?.code > 0) {
+				const { successCount, idleCount } = recoverData.data;
+				let resultHtml = '';
+				if (successCount > 0) resultHtml += `<p class="mb-1 text-success">✔ 완료 처리: ${successCount}건</p>`;
+				if (idleCount > 0)    resultHtml += `<p class="mb-0 text-secondary">↩ 초기화: ${idleCount}건</p>`;
+				await gMessage('복구 완료', resultHtml || '복구가 완료되었습니다.', 'success', 'alert');
+				$modal.grid.getPagination().movePageTo(currentPage);
+			} else {
+				await gMessage('오류', recoverData?.msg ?? '복구 중 오류가 발생했습니다.', 'error', 'alert');
+			}
+		} catch (err) {
+			swal.close();
+			await gApiErrorHandler(err);
+		}
+	});
 
 	$modal.on('click', '.btnDownloadExcel', () => bulkDownload('EXCEL'));
 	$modal.on('click', '.btnDownloadPdf',   () => bulkDownload('PDF'));

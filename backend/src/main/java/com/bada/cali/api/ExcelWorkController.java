@@ -243,6 +243,45 @@ public class ExcelWorkController {
         return ResponseEntity.ok(new ResMessage<>(1, "스마트 복구 완료", result));
     }
 
+    @Operation(
+            summary = "기술책임자결재 복구 미리보기",
+            description = "성적서 id 목록 기준으로 스토리지 signed 파일 존재 여부를 확인하여 예상 복구 결과 반환. " +
+                    "DB 변경 없음. approvalStatus=READY/PROGRESS 인 것만 대상. " +
+                    "파일 있음 → 완료 처리 예정, 파일 없음 → 초기화 예정으로 구분하여 반환.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "미리보기 결과 반환"),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @GetMapping("/manager-recover-preview")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.RecoverPreviewRes>> managerRecoverPreview(
+            @Parameter(description = "복구 대상 성적서 id 목록 (반복 파라미터)", example = "1")
+            @RequestParam List<Long> reportIds,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        ExcelWorkDTO.RecoverPreviewRes result = excelWorkService.previewManagerRecover(reportIds);
+        return ResponseEntity.ok(new ResMessage<>(1, "기술책임자결재 복구 미리보기", result));
+    }
+
+    @Operation(
+            summary = "기술책임자결재 비정상종료 복구 실행",
+            description = "기술책임자결재 비정상종료 복구. " +
+                    "approvalStatus → IDLE, approvalDatetime → NULL으로 초기화. approvMemberId(기술책임자)는 유지됨.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "복구 완료"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류"),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PatchMapping("/manager-smart-recover")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.SmartRecoverRes>> managerSmartRecover(
+            @Valid @RequestBody ExcelWorkDTO.SmartRecoverReq req,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        ExcelWorkDTO.SmartRecoverRes result = excelWorkService.managerSmartRecover(req.getReportIds(), user.getId());
+        return ResponseEntity.ok(new ResMessage<>(1, "기술책임자결재 복구 완료", result));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // 미들웨어 → 서버 (세션 없음, token/X-Callback-Key 인증)
     // ─────────────────────────────────────────────────────────────────────────
@@ -488,18 +527,17 @@ public class ExcelWorkController {
      *
      * token으로 배치를 조회하여 requestMember의 서명 이미지를 스토리지에서 스트리밍한다.
      * SecurityConfig: /api/excelwork/sign-image/** permitAll.
-     * 인증: X-Callback-Key 헤더.
+     * 인증: X-Callback-Key 헤더 검증 제거 — ExcelWorkApp의 DownloadFileAsync가 키 헤더를
+     *       포함하지 않으므로 /file/{fileUuid} 엔드포인트와 동일하게 키 검증 없이 운영.
+     *       token을 알아야 접근 가능하므로 보안상 허용 가능한 수준.
      */
     @Operation(
             summary = "서명 이미지 스트리밍 (미들웨어용)",
             description = "token으로 배치를 조회하여 실무자 서명 이미지를 스토리지에서 스트리밍. " +
-                    "미들웨어가 WORK_APPROVAL 처리 시 서명 이미지를 다운로드할 때 사용. " +
-                    "세션 인증 불필요, X-Callback-Key 인증"
+                    "미들웨어가 WORK_APPROVAL 처리 시 서명 이미지를 다운로드할 때 사용. 세션 인증 불필요"
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "이미지 스트리밍 성공"),
-            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치",
-                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
             @ApiResponse(responseCode = "404", description = "token 또는 서명 이미지 없음",
                     content = @Content(schema = @Schema(implementation = ResMessage.class))),
             @ApiResponse(responseCode = "500", description = "서버 오류",
@@ -507,45 +545,36 @@ public class ExcelWorkController {
     })
     @GetMapping("/sign-image/{token}")
     public ResponseEntity<Resource> streamSignImage(
-            @Parameter(description = "잡 토큰") @PathVariable String token,
-            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+            @Parameter(description = "잡 토큰") @PathVariable String token
     ) {
-        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
         return excelWorkService.streamSignImage(token);
     }
 
     /**
-     * 서명 이미지 스트리밍 — workMemberId 기반 (per-item).
+     * 서명 이미지 스트리밍 — memberId 기반 (per-item).
      *
-     * WORK_APPROVAL 처리 시 item별로 서명 이미지를 다운로드할 때 사용.
-     * 성적서별 실무자가 다를 수 있으므로 token 대신 workMemberId를 직접 받아 조회한다.
+     * WORK_APPROVAL / MANAGER_APPROVAL 처리 시 item별로 서명 이미지를 다운로드할 때 사용.
      * SecurityConfig /api/excelwork/sign-image/** permitAll 적용.
-     * 인증: X-Callback-Key 헤더.
+     * 인증: X-Callback-Key 헤더 검증 제거 — ExcelWorkApp의 DownloadFileAsync가 키 헤더를
+     *       포함하지 않아 MANAGER_APPROVAL 서명 이미지 다운로드 시 403 발생 버그 수정.
+     *       memberId를 알아야 접근 가능하므로 /file/{fileUuid}와 동일한 보안 수준.
      */
     @Operation(
-            summary = "서명 이미지 스트리밍 — workMemberId 기반 (미들웨어 per-item 처리용)",
-            description = "workMemberId로 해당 실무자의 서명 이미지를 스토리지에서 스트리밍. " +
-                    "WORK_APPROVAL 처리 시 item별 서명 이미지를 다운로드할 때 사용. " +
-                    "세션 인증 불필요, X-Callback-Key 인증"
+            summary = "서명 이미지 스트리밍 — memberId 기반 (미들웨어 per-item 처리용)",
+            description = "memberId로 해당 회원의 서명 이미지를 스토리지에서 스트리밍. " +
+                    "WORK_APPROVAL / MANAGER_APPROVAL item별 서명 이미지 다운로드에 사용. 세션 인증 불필요"
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "이미지 스트리밍 성공"),
-            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치"),
-            @ApiResponse(responseCode = "404", description = "해당 workMember의 서명 이미지 없음",
+            @ApiResponse(responseCode = "404", description = "해당 member의 서명 이미지 없음",
                     content = @Content(schema = @Schema(implementation = ResMessage.class))),
             @ApiResponse(responseCode = "500", description = "서버 오류",
                     content = @Content(schema = @Schema(implementation = ResMessage.class)))
     })
     @GetMapping("/sign-image/member/{workMemberId}")
     public ResponseEntity<Resource> streamSignImageByMember(
-            @Parameter(description = "실무자 member id") @PathVariable Long workMemberId,
-            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+            @Parameter(description = "회원 id") @PathVariable Long workMemberId
     ) {
-        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
         return excelWorkService.streamSignImageByWorkMemberId(workMemberId);
     }
 

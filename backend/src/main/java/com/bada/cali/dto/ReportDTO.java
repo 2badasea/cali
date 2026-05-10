@@ -351,5 +351,22 @@ public class ReportDTO {
 		private String newStatus;
 	}
 
+	/** 성적서대기변경 요청 */
+	public record ResetWorkStatusReq(
+		@Schema(description = "대기변경 대상 성적서 ID 목록")
+		List<Long> reportIds
+	) {}
+
+	/** 성적서대기변경 검증 실패 항목 */
+	public record InvalidReportItem(
+		Long id,
+		String reportNum,
+		String reason
+	) {}
+
+	/** 성적서대기변경 응답 (검증 실패 시 data에 포함) */
+	public record ResetWorkStatusRes(
+		List<InvalidReportItem> invalid
+	) {}
 
 }

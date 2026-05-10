@@ -71,7 +71,15 @@ public class GlobalApiExceptionHandler {
 				.body(new ResMessage<>(-1, "파일 크기가 허용 범위를 초과했습니다.", null));
 	}
 
-	// 7) 최종 방패 → 500
+	// 7) 업무 규칙 위반(IllegalArgumentException) → 400
+	// 서비스 레이어에서 명시적으로 throw하는 비즈니스 검증 오류 메시지를 그대로 전달
+	@ExceptionHandler(IllegalArgumentException.class)
+	public ResponseEntity<ResMessage<Object>> handleIllegalArgument(IllegalArgumentException ex) {
+		log.warn("[업무 규칙 위반] {}", ex.getMessage());
+		return ResponseEntity.badRequest().body(new ResMessage<>(-1, ex.getMessage(), null));
+	}
+
+	// 8) 최종 방패 → 500
 	// TODO 추후 각 예외에 맞는 커스텀 메시지를 구현하기 위해 커스텀 예외클래스에 대한 패키지를 별도로 만들어서 관리할 것
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ResMessage<Object>> handleApiException(Exception exception) {

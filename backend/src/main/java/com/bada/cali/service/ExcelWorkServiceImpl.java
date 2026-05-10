@@ -54,6 +54,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -260,8 +262,17 @@ public class ExcelWorkServiceImpl {
                         String.format("성적서작성이 완료되지 않은 성적서입니다. (id: %d)", report.getId()));
             }
             if (report.getWorkStatus() == AppStatus.READY || report.getWorkStatus() == AppStatus.PROGRESS) {
-                throw new IllegalArgumentException(
-                        String.format("이미 실무자결재가 진행 중인 성적서입니다. (id: %d)", report.getId()));
+                // 실제 활성 배치(READY/PROGRESS)가 존재하는지 확인
+                // 반려 후 재시도 등 고착 상태(활성 배치 없음)는 자동 리셋 후 재배치 허용
+                boolean hasActiveBatch = itemRepository.existsActiveBatchForReport(
+                        report.getId(), "WORK_APPROVAL");
+                if (hasActiveBatch) {
+                    throw new IllegalArgumentException(
+                            String.format("이미 실무자결재가 진행 중인 성적서입니다. (id: %d)", report.getId()));
+                }
+                log.warn("성적서 workStatus={} 이지만 활성 WORK_APPROVAL 배치 없음 — IDLE 자동 리셋 (reportId: {})",
+                        report.getWorkStatus(), report.getId());
+                report.setWorkStatus(AppStatus.IDLE);
             }
             if (report.getApprovalStatus() == AppStatus.READY || report.getApprovalStatus() == AppStatus.PROGRESS
                     || report.getApprovalStatus() == AppStatus.SUCCESS) {
@@ -377,7 +388,6 @@ public class ExcelWorkServiceImpl {
             throw new EntityNotFoundException("존재하지 않는 성적서가 포함되어 있습니다.");
         }
 
-        java.util.Set<Long> approvalMemberIds = new java.util.HashSet<>();
         for (Report report : reports) {
             if (report.getIsVisible() != YnType.y) {
                 throw new IllegalArgumentException(
@@ -392,8 +402,21 @@ public class ExcelWorkServiceImpl {
                         String.format("실무자결재가 완료되지 않은 성적서입니다. (id: %d)", report.getId()));
             }
             if (report.getApprovalStatus() == AppStatus.READY || report.getApprovalStatus() == AppStatus.PROGRESS) {
-                throw new IllegalArgumentException(
-                        String.format("이미 기술책임자결재가 진행 중인 성적서입니다. (id: %d)", report.getId()));
+                // 실제 활성 배치(READY/PROGRESS)가 존재하는지 DB 에서 확인
+                // WRITE/WORK_APPROVAL 과 동일한 패턴 — 고착 상태 자동 복구 지원
+                boolean hasActiveBatch = itemRepository.existsActiveBatchForReport(
+                        report.getId(), "MANAGER_APPROVAL");
+                if (hasActiveBatch) {
+                    // 활성 배치가 실제로 있음 → 진행 중이므로 중복 차단
+                    throw new IllegalArgumentException(
+                            String.format("이미 기술책임자결재가 진행 중인 성적서입니다. (id: %d, 성적서번호: %s)",
+                                    report.getId(), report.getReportNum()));
+                }
+                // 활성 배치 없음 → approval_status 만 READY/PROGRESS 인 고착(stuck) 상태
+                // 서버 재시작·치명적 오류 등으로 배치가 사라진 경우 — FAIL 로 자동 리셋 후 재작업 허용
+                log.warn("성적서 approval_status={} 이지만 활성 배치 없음 — FAIL로 자동 리셋 (reportId: {}, reportNum: {})",
+                        report.getApprovalStatus(), report.getId(), report.getReportNum());
+                report.setApprovalStatus(AppStatus.FAIL);
             }
             if (report.getApprovalStatus() == AppStatus.SUCCESS) {
                 throw new IllegalArgumentException(
@@ -403,15 +426,21 @@ public class ExcelWorkServiceImpl {
                 throw new IllegalArgumentException(
                         String.format("기술책임자가 지정되지 않은 성적서입니다. (id: %d)", report.getId()));
             }
-            approvalMemberIds.add(report.getApprovalMemberId());
         }
 
-        // ── 2. 기술책임자 서명 이미지 존재 확인 ──────────────────────────────
+        // ── 2. 각 성적서 approvalMemberId(기술책임자) 기준 서명 이미지 존재 확인 ──
+        // 서명 이미지는 성적서에 등록된 기술책임자(approvalMemberId) 기준으로 삽입되므로
+        // 버튼을 누른 사람이 아닌 성적서별 지정 기술책임자의 서명 이미지가 있어야 한다.
+        List<Long> approvalMemberIds = reports.stream()
+                .map(Report::getApprovalMemberId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
         List<FileInfo> signFileList = fileInfoRepository
                 .findByRefTableNameAndRefTableIdInAndIsVisible("member", approvalMemberIds, YnType.y);
-        java.util.Set<Long> memberIdsWithSign = signFileList.stream()
+        Set<Long> memberIdsWithSign = signFileList.stream()
                 .map(FileInfo::getRefTableId)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         for (Report report : reports) {
             if (!memberIdsWithSign.contains(report.getApprovalMemberId())) {
                 throw new IllegalArgumentException(
@@ -430,11 +459,11 @@ public class ExcelWorkServiceImpl {
 
         // ── 4. 성적서 approvalDatetime 선반영 + approvalStatus → READY ───────
         // 결재일자를 배치 생성 시점에 미리 저장하여 DB 스키마 변경 없이 ExcelWorkApp에 전달.
+        // approvalMemberId는 성적서에 지정된 기술책임자를 유지 (버튼 누른 사람으로 덮어쓰지 않음).
         // 콜백(callbackManagerApprovalItemDone) 시에는 approvalStatus=SUCCESS만 업데이트.
         reports.forEach(r -> {
             r.setApprovalDatetime(approvalDatetime);
             r.setApprovalStatus(AppStatus.READY);
-            r.setApprovalMemberId(memberId);
         });
 
         // ── 5. ReportJobBatch 생성 ────────────────────────────────────────────
@@ -1150,6 +1179,143 @@ public class ExcelWorkServiceImpl {
         log.info("스마트 복구 완료 — {}", logContent);
         return new ExcelWorkDTO.SmartRecoverRes(
                 successNums.size(), idleNums.size(), successNums, idleNums);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10-1. previewManagerRecover — 기술책임자결재 복구 미리보기
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 기술책임자결재 비정상종료 복구 미리보기.
+     * DB 변경 없이 스토리지 파일(signed.xlsx 또는 signed.pdf) 존재 여부만 확인한다.
+     *
+     * @param reportIds 대상 성적서 id 목록 (approvalStatus READY/PROGRESS 인 것만 처리)
+     */
+    @Transactional(readOnly = true)
+    public ExcelWorkDTO.RecoverPreviewRes previewManagerRecover(List<Long> reportIds) {
+        List<ExcelWorkDTO.RecoverItemInfo> successItems = new ArrayList<>();
+        List<ExcelWorkDTO.RecoverItemInfo> idleItems    = new ArrayList<>();
+
+        // 활성 배치(READY/PROGRESS)의 startDatetime을 경과 시간 표시용으로 조회
+        List<ReportJobBatch> activeBatches = batchRepository.findActiveByReportIds(reportIds);
+        Map<Long, LocalDateTime> reportStartMap = buildReportStartMap(activeBatches);
+
+        for (Long reportId : reportIds) {
+            Report report = reportRepository.findById(reportId).orElse(null);
+            if (report == null) continue;
+            // 이미 결재 완료된 성적서는 복구 대상 아님
+            if (report.getApprovalStatus() == AppStatus.SUCCESS) continue;
+
+            // signed.xlsx 또는 signed.pdf 파일 중 하나라도 있으면 완료 처리 대상
+            String xlsxKey = storageProps.getRootDir() + "/report/" + reportId + "/signed.xlsx";
+            String pdfKey  = storageProps.getRootDir() + "/report/" + reportId + "/signed.pdf";
+            boolean fileExists = headObject(xlsxKey) != null || headObject(pdfKey) != null;
+
+            Long minutesAgo = null;
+            LocalDateTime startDt = reportStartMap.get(reportId);
+            if (startDt != null) {
+                minutesAgo = ChronoUnit.MINUTES.between(startDt, LocalDateTime.now());
+            }
+
+            var info = new ExcelWorkDTO.RecoverItemInfo(reportId, report.getReportNum(), minutesAgo);
+            if (fileExists) successItems.add(info);
+            else            idleItems.add(info);
+        }
+
+        return new ExcelWorkDTO.RecoverPreviewRes(successItems, idleItems);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10-2. managerSmartRecover — 기술책임자결재 복구 실행
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 기술책임자결재 비정상종료 복구.
+     * 파일 존재 여부와 무관하게 항상 IDLE로 초기화한다.
+     *
+     *   approvalStatus → IDLE
+     *   approvalDatetime → null
+     *   approvalMemberId(기술책임자) → 변경 없음 (이력 유지)
+     *   file_info / 스토리지 파일 → 변경 없음 (복구 후에도 다운로드 가능)
+     *
+     * @param reportIds 복구 대상 성적서 id 목록
+     * @param memberId  요청자 id (로그 기록용)
+     */
+    @Transactional
+    public ExcelWorkDTO.SmartRecoverRes managerSmartRecover(List<Long> reportIds, Long memberId) {
+        List<String> idleNums = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        // 활성 배치(READY/PROGRESS) 조회 — item/batch 상태 처리용
+        List<ReportJobBatch> activeBatches = batchRepository.findActiveByReportIds(reportIds);
+        Map<Long, Long> reportToBatchId = buildReportToBatchIdMap(activeBatches);
+
+        for (Long reportId : reportIds) {
+            // file_info / 스토리지 파일은 건드리지 않음 — 복구 후에도 기존 signed 파일 다운로드 가능
+            Report report = reportRepository.findById(reportId).orElse(null);
+            if (report == null) continue;
+            if (report.getApprovalStatus() == AppStatus.SUCCESS) continue; // 이미 완료
+
+            // approvalStatus → IDLE, approvalDatetime → null
+            // approvMemberId(기술책임자)는 건드리지 않음 — 이력 유지
+            report.setApprovalStatus(AppStatus.IDLE);
+            report.setApprovalDatetime(null);
+            idleNums.add(report.getReportNum());
+            reportRepository.save(report);
+
+            // item 처리 — 항상 CANCELED
+            Long batchId = reportToBatchId.get(reportId);
+            if (batchId != null) {
+                itemRepository.findByBatchId(batchId).stream()
+                        .filter(i -> i.getReportId().equals(reportId)
+                                  && i.getStatus() != JobItemStatus.SUCCESS)
+                        .forEach(item -> {
+                            item.setStatus(JobItemStatus.CANCELED);
+                            item.setEndDatetime(now);
+                            itemRepository.save(item);
+                        });
+            }
+        }
+
+        // 배치 최종 상태 결정
+        for (ReportJobBatch origBatch : activeBatches) {
+            ReportJobBatch batch = batchRepository.findById(origBatch.getId()).orElse(null);
+            if (batch == null) continue;
+
+            List<ReportJobItem> allItems = itemRepository.findByBatchId(batch.getId());
+            long successCnt  = allItems.stream().filter(i -> i.getStatus() == JobItemStatus.SUCCESS).count();
+            long canceledCnt = allItems.stream().filter(i -> i.getStatus() == JobItemStatus.CANCELED).count();
+
+            if (successCnt == allItems.size()) {
+                batch.setStatus(BatchStatus.SUCCESS);
+                batch.setSuccessCount((int) successCnt);
+            } else if (canceledCnt == allItems.size()) {
+                batch.setStatus(BatchStatus.CANCELED);
+            } else {
+                batch.setStatus(BatchStatus.FAIL);
+                batch.setSuccessCount((int) successCnt);
+                batch.setFailCount((int) (allItems.size() - successCnt - canceledCnt));
+            }
+            batch.setEndDatetime(now);
+            batchRepository.save(batch);
+        }
+
+        // 로그 기록
+        String logContent = String.format(
+                "[기술책임자결재 복구] IDLE 초기화: %d건 [%s]",
+                idleNums.size(), String.join(", ", idleNums));
+        logRepository.save(Log.builder()
+                .workerName("system")
+                .logContent(logContent)
+                .logType("u")
+                .refTable("report")
+                .refTableId(reportIds.isEmpty() ? 0L : reportIds.get(0))
+                .createDatetime(now)
+                .createMemberId(memberId)
+                .build());
+
+        log.info("기술책임자결재 복구 완료 — {}", logContent);
+        return new ExcelWorkDTO.SmartRecoverRes(0, idleNums.size(), List.of(), idleNums);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

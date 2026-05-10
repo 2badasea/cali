@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS `member_permission_read` (
 ) ENGINE=InnoDB AUTO_INCREMENT=30 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `menu` (
-  `id` bigint NOT NULL,
+  `id` bigint NOT NULL AUTO_INCREMENT,
   `menu_alias` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `menu_code` varchar(50) NOT NULL,
   `url` varchar(255) DEFAULT NULL,

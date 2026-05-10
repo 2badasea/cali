@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 // import MonitoringEstimate from "./pages/MonitoringEstimate";        // TODO: 추후 구현 예정
 import Notices from "./pages/Notices";
 import CompanyInfo from "./pages/CompanyInfo";
+import MenuManagement from "./pages/MenuManagement";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         {/* <Route path="/monitoring-estimate" element={<MonitoringEstimate />} /> */}
         <Route path="/notices" element={<Notices />} />
         <Route path="/company-info" element={<CompanyInfo />} />
+        <Route path="/menu-management" element={<MenuManagement />} />
       </Route>
 
       <Route path="*" element={<div className="page">Not Found</div>} />
