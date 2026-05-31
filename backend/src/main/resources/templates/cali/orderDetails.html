@@ -11,8 +11,24 @@
                     <ul class="list-group list-group-horizontal font-weight-bold mr-auto">
                         <li>
                             <button type="button" class="btn btn-danger deleteReport">삭제</button>
-                            <button type="button" class="btn btn-primary addReport">등록</button>
-                            <button type="button" class="btn btn-success btnBulkEdit">통합수정</button>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-primary addSelfReport">자체 등록</button>
+                                <button type="button" class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    <span class="sr-only">Toggle Dropdown</span>
+                                </button>
+                                <div class="dropdown-menu">
+                                    <a class="dropdown-item addAgcyReport" href="#">대행 등록</a>
+                                </div>
+                            </div>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-success btnBulkEditSelf">자체 통합수정</button>
+                                <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    <span class="sr-only">Toggle Dropdown</span>
+                                </button>
+                                <div class="dropdown-menu">
+                                    <a class="dropdown-item btnBulkEditAgcy" href="#">대행 통합수정</a>
+                                </div>
+                            </div>
                         </li>
                     </ul>
                     <ul class="list-group list-group-horizontal font-weight-bold pt-2">
@@ -43,7 +59,13 @@
                             </select>
                         </li>
                         <li class="mr-1">
-                            <!-- 중분류코드/소분류코드 -->
+                            <select class="form-control reportType" name="reportType">
+                                <option value="" selected>구분전체</option>
+                                <option value="SELF">자체</option>
+                                <option value="AGCY">대행</option>
+                            </select>
+                        </li>
+                        <li class="mr-1">
                             <!-- 접수구분 -->
                             <select class="form-control orderType" name="orderType">
                                 <option value="" selected>접수구분</option>
@@ -61,6 +83,7 @@
                                 <option value="return">반려</option>
                                 <option value="progress">진행중</option>
                                 <option value="success">완료</option>
+                                <option value="cancel">취소(대행)</option>
                             </select>
                         </li>
                         <li class="mr-1 d-flex">
@@ -74,6 +97,7 @@
                                     <option value="itemMakeAgent">제작회사</option>
                                     <option value="itemFormat">형식</option>
                                     <option value="itemNum">기기번호</option>
+                                    <option value="agcyAgent">의뢰처</option>
                                 </select>
                                 <div class="input-group-append">
                                     <input type="input" class="form-control" id="keyword" name="keyword" value="" />

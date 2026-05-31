@@ -1,11 +1,16 @@
 package com.bada.cali.service;
 
+import com.bada.cali.common.enums.AuthType;
 import com.bada.cali.dto.MenuDTO;
+import com.bada.cali.entity.Member;
 import com.bada.cali.entity.Menu;
+import com.bada.cali.entity.MemberPermissionRead;
 import com.bada.cali.repository.MemberPermissionReadRepository;
+import com.bada.cali.repository.MemberRepository;
 import com.bada.cali.repository.MenuRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -15,9 +20,11 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Log4j2
 public class MenuAdminService {
 
     private final MenuRepository menuRepository;
+    private final MemberRepository memberRepository;
     private final MemberPermissionReadRepository permissionReadRepository;
     private final MenuQueryService menuQueryService;
 
@@ -88,6 +95,7 @@ public class MenuAdminService {
 
         Menu saved = menuRepository.save(menu);
         menuQueryService.evictMenuCache();
+        syncAdminPermissions();
         return MenuDTO.TreeRes.from(saved);
     }
 
@@ -110,8 +118,8 @@ public class MenuAdminService {
 
         // url 중복 체크 (값이 있고 변경된 경우, 자기 자신 제외)
         if (StringUtils.hasText(req.getUrl())
-                && !req.getUrl().equals(menu.getUrl())
-                && menuRepository.existsByUrlAndIdNot(req.getUrl(), id)) {
+            && !req.getUrl().equals(menu.getUrl())
+            && menuRepository.existsByUrlAndIdNot(req.getUrl(), id)) {
             throw new IllegalArgumentException("이미 사용 중인 링크 URL입니다: " + req.getUrl());
         }
 
@@ -142,6 +150,7 @@ public class MenuAdminService {
 
         menuRepository.delete(menu);
         menuQueryService.evictMenuCache();
+        syncAdminPermissions();
     }
 
     // ── 형제 메뉴 순서 일괄 변경 ──────────────────────────────────────────────
@@ -161,6 +170,34 @@ public class MenuAdminService {
         }
 
         menuQueryService.evictMenuCache();
+    }
+
+    // ── admin 권한 멤버 메뉴 권한 자동 동기화 ────────────────────────────────────
+    // 메뉴 등록/삭제 시 호출. admin 멤버의 permission_read를 현재 전체 메뉴 기준으로 재설정.
+
+    private void syncAdminPermissions() {
+        List<Member> admins = memberRepository.findAllByAuth(AuthType.admin);
+        if (admins.isEmpty()) return;
+
+        // admin 멤버별 기존 권한 전체 삭제
+        for (Member admin : admins) {
+            permissionReadRepository.deleteAllByMemberId(admin.getId());
+        }
+
+        // 현재 전체 메뉴 조회 (is_visible 무관)
+        List<Menu> allMenus = menuRepository.findAllByOrderByDepthAscSortOrderAsc();
+
+        // admin 멤버 × 전체 메뉴 조합으로 권한 일괄 등록
+        List<MemberPermissionRead> permissions = new ArrayList<>();
+        for (Member admin : admins) {
+            for (Menu menu : allMenus) {
+                permissions.add(MemberPermissionRead.of(admin, menu));
+            }
+        }
+        permissionReadRepository.saveAll(permissions);
+
+        log.info("[메뉴 권한 동기화] admin 멤버 {}명 × 메뉴 {}개 권한 재설정 완료",
+                admins.size(), allMenus.size());
     }
 
     // ── 내부 유틸: flat 목록 → 트리 변환 ─────────────────────────────────────

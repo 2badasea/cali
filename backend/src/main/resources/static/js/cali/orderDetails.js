@@ -38,6 +38,7 @@
 				readData: {
 					url: '/api/report/getOrderDetailsList',
 					serializer: (grid_param) => {
+						grid_param.reportType = $('form.searchForm .reportType', $modal).val() ?? ''; // 구분(자체/대행)
 						grid_param.orderType = $('form.searchForm .orderType', $modal).val() ?? ''; // 전체선택은 빈 값으로 넘어옴
 						grid_param.statusType = $('form.searchForm .statusType', $modal).val() ?? ''; // 진행상태
 						grid_param.middleItemCodeId = Number($('form.searchForm .middleCodeSelect', $modal).val() ?? 0); // 전체선택(''), null, undefined 모두 커버
@@ -143,11 +144,50 @@
 						return reportStatusLabel(data.value);
 					},
 				},
-		],
-		pageOptions: {
+				{
+					// AGCY 전용: 대행성적서번호 (SELF는 null)
+					header: '대행성적서번호',
+					name: 'agcySelfReportNum',
+					className: 'cursor_pointer',
+					width: '120',
+					align: 'center',
+				},
+				{
+					// AGCY 전용: 의뢰처 (SELF는 null)
+					header: '의뢰처',
+					name: 'agcyAgent',
+					className: 'cursor_pointer',
+					width: '120',
+					align: 'center',
+				},
+				{
+					// EXCEL 파일 다운로드: SELF=signed_xlsx, AGCY=agcy_excel (없으면 null)
+					header: 'EXCEL',
+					name: 'xlsxFileId',
+					width: '55',
+					align: 'center',
+					formatter: function (data) {
+						if (!data.value) return '';
+						return `<a href="/file/fileDown/${data.value}" onclick="event.stopPropagation()"><i class="bi bi-file-earmark-excel text-success fs-5"></i></a>`;
+					},
+				},
+				{
+					// PDF 파일 다운로드: SELF=signed_pdf, AGCY=agcy_pdf (없으면 null)
+					header: 'PDF',
+					name: 'pdfFileId',
+					width: '55',
+					align: 'center',
+					formatter: function (data) {
+						if (!data.value) return '';
+						return `<a href="/file/fileDown/${data.value}" onclick="event.stopPropagation()"><i class="bi bi-file-earmark-pdf text-danger fs-5"></i></a>`;
+					},
+				},
+			],
+			pageOptions: {
 				useClient: false, // 서버 페이징
 				perPage: 20, // 기본 20. 선택한 '행 수'에 따라 유동적으로 변경	=> change 이벤트를 통해 setPerPage() 함수 호출
 			},
+			rowHeaders: ['checkbox'],		// 체크박스 활성화			
 			minBodyHeight: 663,
 			bodyHeight: 663,
 			data: $modal.data_source, // 그리드의 데이터를 초기화하는 과정에서 api 호출
@@ -157,8 +197,9 @@
 		// 그리드 이벤트 정의
 		$modal.grid.on('click', async function (e) {
 			const row = $modal.grid.getRow(e.rowKey);
-			// 성적서 수정 모달을 호출한다.
-			if (row && e.columnName != '_checked') {
+			// EXCEL/PDF 다운로드 컬럼 및 체크박스 컬럼 클릭 시 모달 비활성화
+			const skipColumns = ['_checked', 'xlsxFileId', 'pdfFileId'];
+			if (row && !skipColumns.includes(e.columnName)) {
 				// 자체와 대행을 구분한다.
 				const id = row.id;
 				const reportNum = row.reportNum; // 성적서 번호
@@ -189,8 +230,20 @@
 				}
 				// 대행
 				else {
-					gToast('대행성적서 수정은 아직 제공되지 않습니다.', 'warning');
-					return false;
+					const resModal = await gModal(
+						'/cali/agcyReportModify',
+						{ id: id },
+						{
+							title: `대행성적서 수정 [${reportNum ?? id}]`,
+							size: 'xl',
+							show_close_button: true,
+							show_confirm_button: true,
+							confirm_button_text: '저장',
+						},
+					);
+					if (resModal) {
+						$modal.grid.reloadData();
+					}
 				}
 			}
 		});
@@ -203,8 +256,8 @@
 			e.preventDefault();
 			$modal.grid.getPagination().movePageTo(1); // 변경된 페이지 옵션에 맞춰 페이지 렌더링
 		})
-		// 성적서 등록 모달 호출
-		.on('click', '.addReport', async function () {
+		// 자체성적서 등록 모달 호출
+		.on('click', '.addSelfReport', async function () {
 			const resModal = await gModal(
 				'/cali/registerMultiReport',
 				{
@@ -218,8 +271,28 @@
 					show_close_button: true,
 					show_confirm_button: true,
 					confirm_button_text: '저장',
-					// FIX 엑셀등록 기능 구현할 것
-					// 	`<button type="button" class="btn btn-success addReportExcel btn-sm"><i class="bi bi-file-excel"></i>EXCEL 등록</button>`,
+				},
+			);
+			if (resModal) {
+				$modal.grid.reloadData();
+			}
+		})
+		// 대행성적서 등록 모달 호출
+		.on('click', '.addAgcyReport', async function (e) {
+			e.preventDefault();
+			const resModal = await gModal(
+				'/cali/agcyRegisterReport',
+				{
+					caliOrderId: caliOrderId,
+					smallItemCodeSetObj: smallItemCodeSet,
+					middleItemCodeSetAry: middleItemCodeSet,
+				},
+				{
+					title: '대행성적서 등록',
+					size: 'xl',
+					show_close_button: true,
+					show_confirm_button: true,
+					confirm_button_text: '저장',
 				},
 			);
 			if (resModal) {
@@ -371,11 +444,11 @@
 			// 2. api를 두 번 탈 것(서버차원에서 검증)
 			// 3. 검증이 완료되었다면, 대상 id들만 삭제api로 보낼 것 (deletemapping 활용?)
 		})
-	// 버튼: 통합수정
+	// 버튼: 자체 통합수정
 	// 1) 체크된 항목 없으면 warning
 	// 2) 자체성적서(SELF)만 대상 (대행 포함 시 경고)
 	// 3) 검증 통과 시 selfReportMultiUpdate 모달 호출
-	.on('click', '.btnBulkEdit', async function () {
+	.on('click', '.btnBulkEditSelf', async function () {
 		const checkedRows = $modal.grid.getCheckedRows();
 		if (!checkedRows || checkedRows.length === 0) {
 			gToast('리스트에서 항목을 선택해 주세요.', 'warning');
@@ -396,6 +469,42 @@
 			{ reportIds },
 			{
 				title: `통합수정 [${reportIds.length}건 선택]`,
+				size: 'xl',
+				show_close_button: true,
+				show_confirm_button: true,
+				confirm_button_text: '저장',
+			}
+		);
+
+		// 모달 닫힘 후 그리드 재조회
+		$modal.grid.reloadData();
+	})
+	// 버튼: 대행 통합수정
+	// 1) 체크된 항목 없으면 warning
+	// 2) 대행성적서(AGCY)만 대상 (자체 포함 시 경고)
+	// 3) 검증 통과 시 agcyReportMultiUpdate 모달 호출
+	.on('click', '.btnBulkEditAgcy', async function (e) {
+		e.preventDefault();
+		const checkedRows = $modal.grid.getCheckedRows();
+		if (!checkedRows || checkedRows.length === 0) {
+			gToast('리스트에서 항목을 선택해 주세요.', 'warning');
+			return;
+		}
+
+		// 자체 성적서 포함 여부 확인
+		const hasSelf = checkedRows.some(row => row.reportType !== 'AGCY');
+		if (hasSelf) {
+			gToast('대행성적서(AGCY)만 통합수정 가능합니다.', 'warning');
+			return;
+		}
+
+		const reportIds = checkedRows.map(row => row.id);
+
+		await gModal(
+			'/cali/agcyReportMultiUpdate',
+			{ reportIds },
+			{
+				title: `대행 통합수정 [${reportIds.length}건 선택]`,
 				size: 'xl',
 				show_close_button: true,
 				show_confirm_button: true,

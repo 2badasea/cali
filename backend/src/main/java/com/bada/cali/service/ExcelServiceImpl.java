@@ -1,5 +1,6 @@
 package com.bada.cali.service;
 
+import com.bada.cali.common.enums.ReportType;
 import com.bada.cali.config.NcpStorageProperties;
 import com.bada.cali.entity.Agent;
 import com.bada.cali.entity.CaliOrder;
@@ -317,13 +318,18 @@ public class ExcelServiceImpl {
 			Report r = reports.get(i);
 			int rowIdx = getListRowIndex(i, page1Start, page1Count, page2Start);
 
+			// AGCY 성적서는 자체대행성적서번호를 자산번호로 사용
+			String assetNum = (r.getReportType() == ReportType.AGCY)
+					? r.getAgcySelfReportNum()
+					: r.getManageNo();
+
 			setCellValue(sheet, rowIdx, "A",  String.valueOf(i + 1)); // NO
 			setCellValue(sheet, rowIdx, "E",  r.getItemName());       // 품명
 			setCellValue(sheet, rowIdx, "AI", r.getItemFormat());     // 형식
 			setCellValue(sheet, rowIdx, "BH", r.getItemNum());        // 기기번호
 			setCellValue(sheet, rowIdx, "CE", r.getItemMakeAgent());  // 제조회사
 			setCellValue(sheet, rowIdx, "CY", r.getRemark());         // 비고
-			setCellValue(sheet, rowIdx, "DW", r.getManageNo());       // 자산번호
+			setCellValue(sheet, rowIdx, "DW", assetNum);              // 자산번호 (AGCY: 자체대행성적서번호, SELF: 관리번호)
 		}
 	}
 

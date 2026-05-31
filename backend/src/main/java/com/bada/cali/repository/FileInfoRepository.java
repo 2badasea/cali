@@ -163,6 +163,14 @@ public interface FileInfoRepository extends JpaRepository<FileInfo, Long> {
 			@Param("userId") Long userId
 	);
 
+	// AGCY 파일 존재여부 확인 (name = 'agcy_excel' 또는 'agcy_pdf')
+	boolean existsByRefTableNameAndRefTableIdAndNameAndIsVisible(
+			String refTableName,
+			Long refTableId,
+			String name,
+			YnType isVisible
+	);
+
 	/**
 	 * 특정 ref에 해당하는 file_info 전체 소프트삭제.
 	 * 수리/불가 처리 시 origin·signed 구분 없이 모든 파일을 논리 삭제할 때 사용한다.

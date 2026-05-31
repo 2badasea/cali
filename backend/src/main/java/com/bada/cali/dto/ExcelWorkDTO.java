@@ -88,12 +88,36 @@ public class ExcelWorkDTO {
         private String serverUrl;
     }
 
+    @Getter
+    @Setter
+    @Schema(description = "성적서출력 작업 요청")
+    public static class CreatePrintJobReq {
+
+        @NotEmpty
+        @Schema(description = "출력 대상 성적서 id 목록 (1건 이상)", example = "[1, 2, 3]")
+        private List<Long> reportIds;
+
+        /**
+         * 미들웨어가 콜백을 보낼 서버 URL.
+         * null이면 서버의 app.cali.callback-base-url 설정값 사용.
+         */
+        @Schema(description = "미들웨어가 콜백을 보낼 CALI 서버 URL (null 허용, 서버 설정값 폴백)",
+                example = "https://mycali.com")
+        private String serverUrl;
+    }
+
     /** createJob 응답 — 브라우저가 excelworkUri를 URI 스킴으로 실행 */
     public record CreateJobRes(
             @Schema(description = "생성된 배치 id") Long batchId,
             @Schema(description = "미들웨어 인증 토큰 (UUID)") String token,
             @Schema(description = "미들웨어 실행 URI (excelwork://process?token=...&serverUrl=...)") String excelworkUri,
             @Schema(description = "총 처리 건수") int totalCount
+    ) {}
+
+    /** 성적서출력 단건 완료 콜백 요청 — 미들웨어 → 서버 */
+    public record PrintItemDoneReq(
+            @Schema(description = "잡 토큰") String token,
+            @Schema(description = "완료 처리할 report_job_item.id") Long itemId
     ) {}
 
     // ── 미들웨어용 잡 조회 응답 ───────────────────────────────────────────────
@@ -147,6 +171,10 @@ public class ExcelWorkDTO {
      *   - 문자열 필드: 값 그대로 (null 가능 → 미들웨어가 빈 문자열로 처리)
      *   - 날짜(LocalDate): ISO 8601 문자열 "yyyy-MM-dd" (미들웨어가 format에 따라 변환)
      *   - 정수(itemCaliCycle): 숫자 문자열 (예: "12")
+     *
+     * equipmentList: WRITE 타입 전용. 성적서에 연결된 표준장비 목록 (seq ASC).
+     *   미들웨어가 '데이터' 시트 38행부터 장비당 2행(국문/영문)으로 삽입.
+     *   WRITE 외 타입에서는 빈 리스트.
      */
     public record ItemDetail(
             @Schema(description = "report_job_item.id") Long itemId,
@@ -157,7 +185,23 @@ public class ExcelWorkDTO {
             @Schema(description = "셀 삽입 데이터 (fieldCode → 값 문자열)") Map<String, String> data,
             @Schema(description = "서명 이미지 URL — WORK_APPROVAL 전용, 이 item 성적서의 workMember 서명 이미지. " +
                     "GET /api/excelwork/sign-image/member/{workMemberId}. 그 외 null", nullable = true)
-            String signImgUrl
+            String signImgUrl,
+            @Schema(description = "표준장비 목록 (WRITE 타입 전용, seq ASC). '데이터' 시트 38행부터 국문/영문 2행 단위로 삽입.")
+            List<EquipmentItem> equipmentList
+    ) {}
+
+    /**
+     * 성적서작성 시 '데이터' 시트에 삽입하는 표준장비 단건 데이터.
+     * standard_equipment + standard_equipment_ref 조인 결과.
+     */
+    public record EquipmentItem(
+            @Schema(description = "표시 순서 (standard_equipment_ref.seq)") Integer seq,
+            @Schema(description = "장비명 국문") String name,
+            @Schema(description = "장비명 영문 (null 가능)") String nameEn,
+            @Schema(description = "제작회사 국문 (null 가능)") String makeAgent,
+            @Schema(description = "제작회사 영문 (null 가능)") String makeAgentEn,
+            @Schema(description = "모델명/형식 (국문 행에만 사용, null 가능)") String modelName,
+            @Schema(description = "기기번호 (국문/영문 행 공통, null 가능)") String serialNo
     ) {}
 
     // ── 미들웨어 → 서버 콜백 요청 ────────────────────────────────────────────

@@ -153,6 +153,37 @@ public class ExcelWorkController {
     }
 
     /**
+     * 성적서출력 작업 요청 — createPrintJob.
+     *
+     * 브라우저에서 출력 대상 성적서를 선택한 뒤 호출.
+     * 응답의 excelworkUri를 window.location.href로 실행하면
+     * ExcelWorkApp이 기동되어 signed.pdf를 프린터로 출력하고
+     * 건별로 콜백을 호출해 is_print='y'로 갱신한다.
+     */
+    @Operation(
+            summary = "성적서출력 작업 요청 (ExcelWork)",
+            description = "출력 대상 성적서 id 목록을 받아 PRINT 배치를 생성하고 미들웨어 실행 URI를 반환. " +
+                    "미들웨어는 건별로 signed.pdf를 다운로드 → 프린터 출력 → 콜백(is_print='y') 처리함."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "작업 준비 완료 (excelworkUri 포함)"),
+            @ApiResponse(responseCode = "400", description = "요청 파라미터 오류 또는 출력 불가 성적서 포함",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/batches/print")
+    public ResponseEntity<ResMessage<ExcelWorkDTO.CreateJobRes>> createPrintJob(
+            @Valid @RequestBody ExcelWorkDTO.CreatePrintJobReq req,
+            @AuthenticationPrincipal CustomUserDetails user
+    ) {
+        ExcelWorkDTO.CreateJobRes res = excelWorkService.createPrintJob(req, user.getId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new ResMessage<>(1, String.format(
+                        "성적서출력 작업이 준비되었습니다. (%d건)", res.totalCount()), res));
+    }
+
+    /**
      * 비정상 종료 복구 — 고착 배치 초기화.
      *
      * READY/PROGRESS 상태로 고착된 배치를 CANCELED 로 전환하고
@@ -520,6 +551,40 @@ public class ExcelWorkController {
         }
         excelWorkService.callbackManagerApprovalItemDone(token, itemId, xlsxFile, pdfFile);
         return ResponseEntity.ok(new ResMessage<>(1, "기술책임자결재 item 완료 처리 성공", null));
+    }
+
+    /**
+     * 성적서출력 단건 완료 콜백 — 미들웨어가 PDF 출력 완료 후 호출.
+     *
+     * report.is_print → 'y' 갱신.
+     * 파일 업로드 없음 (출력만 하므로 서버에 파일 전송 불필요).
+     */
+    @Operation(
+            summary = "성적서출력 단건 완료 콜백 (ExcelWork)",
+            description = "ExcelWork 미들웨어가 성적서 1건 출력 완료 후 호출. report.is_print='y'로 갱신됨."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "출력 완료 처리 성공"),
+            @ApiResponse(responseCode = "400", description = "파라미터 오류 또는 PRINT 배치 아님",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "403", description = "X-Callback-Key 불일치",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "404", description = "유효하지 않은 token 또는 itemId",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class))),
+            @ApiResponse(responseCode = "500", description = "서버 오류",
+                    content = @Content(schema = @Schema(implementation = ResMessage.class)))
+    })
+    @PostMapping("/callback/print-item-done")
+    public ResponseEntity<ResMessage<Void>> callbackPrintItemDone(
+            @RequestBody ExcelWorkDTO.PrintItemDoneReq req,
+            @RequestHeader(value = "X-Callback-Key", defaultValue = "") String callbackKey
+    ) {
+        if (!excelWorkService.isValidCallbackKey(callbackKey)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(new ResMessage<>(-1, "유효하지 않은 콜백 키입니다.", null));
+        }
+        excelWorkService.callbackPrintItemDone(req.token(), req.itemId());
+        return ResponseEntity.ok(new ResMessage<>(1, "성적서출력 item 완료 처리 성공", null));
     }
 
     /**

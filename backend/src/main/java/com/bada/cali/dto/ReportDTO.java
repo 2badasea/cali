@@ -49,7 +49,6 @@ public class ReportDTO {
 	@Getter
 	@Setter
 	public static class GetOrderDetailsReq extends TuiGridDTO.Request {
-		// TODO 추후, 중분류/소분류 추가되면 필드 추가 선언할 것
 		private String searchType;        // 검색타입
 		private String keyword;            // 검색키워드
 		private String statusType;        // 진행상태
@@ -57,6 +56,7 @@ public class ReportDTO {
 		private Long caliOrderId;            // 접수id
 		private Long middleItemCodeId;        // 중분류코드id
 		private Long smallItemCodeId;        // 소분류코드id
+		private String reportType;           // 성적서타입 필터 (SELF | AGCY | null=전체)
 	}
 	
 	// 실무자결재 목록 조회 요청 파라미터
@@ -368,5 +368,128 @@ public class ReportDTO {
 	public record ResetWorkStatusRes(
 		List<InvalidReportItem> invalid
 	) {}
+
+	// ── 대행성적서(AGCY) 관련 DTO ──────────────────────────────────────────────
+
+	/**
+	 * 대행성적서 등록 요청
+	 * - 1회 호출에 여러 기기(items)를 한 번에 등록할 수 있음
+	 * - agcyAgent / orderType 은 등록 묶음 전체에 공통 적용
+	 */
+	@Getter
+	@Setter
+	@NoArgsConstructor
+	public static class AddAgcyReportReq {
+		private Long caliOrderId;           // 접수 id
+		private OrderType orderType;        // 접수구분 (공인·비공인·시험)
+		private String agcyAgent;           // 대행의뢰처 (외부 교정기관명)
+		private List<AgcyItemReq> items;    // 등록할 기기 목록 (1건 이상)
+	}
+
+	/** 대행성적서 등록 시 기기 1건 단위 */
+	public record AgcyItemReq(
+			Long middleItemCodeId,   // 중분류코드 id
+			Long smallItemCodeId,    // 소분류코드 id
+			Long itemId,             // 품목 고유 id (null 가능)
+			String itemName,         // 품목명
+			String itemNameEn,       // 품목명 영문
+			String itemMakeAgent,    // 제작회사
+			String itemMakeAgentEn,  // 제작회사 영문
+			String itemFormat,       // 기기 형식
+			String itemNum,          // 기기번호
+			Integer itemCaliCycle,   // 교정주기
+			Long caliFee,            // 교정수수료
+			String remark            // 비고
+	) {}
+
+	/**
+	 * 대행성적서 수정 요청
+	 * - 성적서번호(reportNum)는 외부 교정기관에서 받은 번호이며 null 가능
+	 * - caliDate 도 null 이면 변경 안 함
+	 */
+	public record UpdateAgcyReportReq(
+			Long id,                 // 성적서 id
+			String reportNum,        // 외부 성적서번호 (null 가능)
+			String agcyAgent,        // 대행의뢰처
+			Long middleItemCodeId,
+			Long smallItemCodeId,
+			Long itemId,
+			String itemName,
+			String itemNameEn,
+			String itemMakeAgent,
+			String itemMakeAgentEn,
+			String itemFormat,
+			String itemNum,
+			Long caliFee,
+			String remark,
+			LocalDate caliDate       // 교정일자 (null 이면 변경 안 함)
+	) {}
+
+	/**
+	 * 대행성적서 수정 모달 응답 DTO
+	 * - 성적서 정보 + 해당 접수의 업체/발행처 정보를 함께 반환
+	 */
+	public record AgcyReportDetailRes(
+			// 성적서 정보
+			Long id,
+			OrderType orderType,
+			String agcyAgent,
+			String agcySelfReportNum,  // 자체대행성적서번호 (예: BD26-0006-D0001)
+			String reportNum,          // 외부 성적서번호
+			LocalDate caliDate,
+			Long middleItemCodeId,
+			Long smallItemCodeId,
+			Long itemId,
+			String itemName,
+			String itemNameEn,
+			String itemMakeAgent,
+			String itemMakeAgentEn,
+			String itemFormat,
+			String itemNum,
+			Integer itemCaliCycle,
+			Long caliFee,
+			String remark,
+			ReportStatus reportStatus,
+			String statusRemark,
+
+			// 접수 정보 (화면 상단 표시용)
+			String custAgent,          // 신청업체
+			String custAgentAddr,      // 신청업체 주소
+			String custManager,        // 신청업체 담당자
+			String custManagerTel,     // 신청업체 담당자 연락처
+			String reportAgent,        // 성적서발행처
+			String reportAgentEn,      // 성적서발행처 영문
+			String reportAgentAddr,    // 성적서발행처 주소
+			String reportManager,      // 성적서발행처 담당자
+			String reportManagerTel    // 성적서발행처 담당자 연락처
+	) {}
+
+	/**
+	 * 대행성적서 통합수정 요청
+	 * - 각 필드가 null 이면 해당 항목을 변경하지 않음 (partial update)
+	 * - reportStatus 는 AGCY 전용 값(SUCCESS·CANCEL)만 허용
+	 */
+	@Getter
+	@Setter
+	@NoArgsConstructor
+	@Schema(description = "대행성적서 통합수정 요청")
+	public static class AgcyReportMultiUpdateReq {
+
+		@NotEmpty(message = "대상 성적서를 1건 이상 선택해야 합니다.")
+		@Schema(description = "대상 성적서 id 목록")
+		private List<Long> reportIds;
+
+		@Schema(description = "대행의뢰처 (null = 변경 안 함)")
+		private String agcyAgent;
+
+		@Schema(description = "교정일자 (null = 변경 안 함)")
+		private LocalDate caliDate;
+
+		@Schema(description = "진행상태 — SUCCESS(완료) 또는 CANCEL(취소) 만 허용. null = 변경 안 함")
+		private String reportStatus;
+
+		@Schema(description = "외부 성적서번호 (null = 변경 안 함)")
+		private String reportNum;
+	}
 
 }

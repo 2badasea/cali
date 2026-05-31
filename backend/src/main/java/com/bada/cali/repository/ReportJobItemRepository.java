@@ -1,5 +1,6 @@
 package com.bada.cali.repository;
 
+import com.bada.cali.common.enums.JobType;
 import com.bada.cali.entity.ReportJobItem;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -23,7 +24,7 @@ public interface ReportJobItemRepository extends JpaRepository<ReportJobItem, Lo
      * 활성 배치가 없다면 고착(stuck) 상태로 간주하여 자동 FAIL 리셋 후 재작업을 허용한다.
      *
      * @param reportId 대상 성적서 id
-     * @param jobType  작업 유형 ('WRITE' 또는 'WORK_APPROVAL')
+     * @param jobType  작업 유형 (JobType enum)
      * @return 활성 배치가 1건 이상 존재하면 true
      */
     @Query("""
@@ -36,6 +37,6 @@ public interface ReportJobItemRepository extends JpaRepository<ReportJobItem, Lo
     """)
     boolean existsActiveBatchForReport(
             @Param("reportId") Long reportId,
-            @Param("jobType")  String jobType
+            @Param("jobType")  JobType jobType
     );
 }

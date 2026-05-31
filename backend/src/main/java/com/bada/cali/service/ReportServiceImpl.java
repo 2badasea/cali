@@ -2,20 +2,25 @@ package com.bada.cali.service;
 
 import com.bada.cali.common.ResMessage;
 import com.bada.cali.common.enums.*;
+import com.bada.cali.dto.AgentCaliHistoryDTO;
 import com.bada.cali.dto.EquipmentDTO;
 import com.bada.cali.dto.ItemDTO;
 import com.bada.cali.dto.ReportDTO;
+import com.bada.cali.dto.ReportPrintDTO;
 import com.bada.cali.dto.TuiGridDTO;
 import com.bada.cali.entity.*;
 import com.bada.cali.mapper.ReportMapper;
 import com.bada.cali.mapper.StandardEquipmentRefMapper;
+import com.bada.cali.repository.AgentRepository;
 import com.bada.cali.repository.CaliOrderRepository;
 import com.bada.cali.repository.EquipmentRefRepository;
 import com.bada.cali.repository.FileInfoRepository;
 import com.bada.cali.repository.LogRepository;
 import com.bada.cali.repository.MemberRepository;
 import com.bada.cali.repository.ReportRepository;
+import com.bada.cali.repository.projection.AgentCaliHistoryListRow;
 import com.bada.cali.repository.projection.OrderDetailsList;
+import com.bada.cali.repository.projection.ReportPrintListRow;
 import com.bada.cali.repository.projection.WorkApprovalListRow;
 import com.bada.cali.security.CustomUserDetails;
 import jakarta.persistence.EntityNotFoundException;
@@ -48,6 +53,7 @@ public class ReportServiceImpl {
 	private final NumberSequenceService numberSequenceService;
 	private final FileInfoRepository fileInfoRepository;
 	private final MemberRepository memberRepository;
+	private final AgentRepository agentRepository;
 	
 	/**
 	 * 성적서 등록
@@ -268,21 +274,25 @@ public class ReportServiceImpl {
 		if (searchType == null || searchType.isBlank()) {
 			searchType = "all";
 		}
-		
+
 		String keyword = request.getKeyword();
 		// 키워드가 혹시 null로 넘어온 경우 빈값으로 취급하여 where절을 타지 않도록 한다.
 		keyword = (keyword == null) ? "" : keyword.trim();
 		// 접수id
 		Long caliOrderId = request.getCaliOrderId();
-		
+
+		// 4. 성적서타입 필터 (SELF | AGCY | null=전체)
+		String reportTypeStr = request.getReportType();
+		ReportType reportType = (reportTypeStr == null || reportTypeStr.isBlank()) ? null : ReportType.valueOf(reportTypeStr);
+
 		// 프로젝션(인터페이스)를 통해서 바로 dto로 넘겨줄 데이터를 받기 때문에, Page<> 타입으로 받지 않음
-		
-		List<OrderDetailsList> pageResult = reportRepository.searchOrderDetails(orderType, statusType, searchType, keyword, caliOrderId, middleItemCodeId, smallItemCodeId, pageable);
+
+		List<OrderDetailsList> pageResult = reportRepository.searchOrderDetails(reportType, orderType, statusType, searchType, keyword, caliOrderId, middleItemCodeId, smallItemCodeId, pageable);
 
 		// NOTE 프로젝션 타입으로 바로 받기 때문에 entity -> dto 변환 과정은 생략
 
 		// 전체 건수 조회 (서버 페이징 totalCount 제공용 — 동일 WHERE 조건으로 별도 count 쿼리 실행)
-		long totalCount = reportRepository.countOrderDetails(orderType, statusType, searchType, keyword, caliOrderId, middleItemCodeId, smallItemCodeId);
+		long totalCount = reportRepository.countOrderDetails(reportType, orderType, statusType, searchType, keyword, caliOrderId, middleItemCodeId, smallItemCodeId);
 
 		// 페이지네이션 데이터 세팅
 		TuiGridDTO.Pagination pagination = TuiGridDTO.Pagination.builder()
@@ -1114,5 +1124,353 @@ public class ReportServiceImpl {
 		return new ResMessage<>(1, "상태가 변경되었습니다.", null);
 	}
 
+	/**
+	 * 성적서출력 목록 조회
+	 * - 기술책임자 결재 완료(approval_status=SUCCESS) + 미출력(is_print='n') + 자체성적서(SELF)
+	 * - 반려/불가 상태 제외
+	 */
+	@Transactional(readOnly = true)
+	public TuiGridDTO.ResData<ReportPrintListRow> getReportPrintList(ReportPrintDTO.ListReq req) {
+		int page    = Math.max(req.getPage() - 1, 0);
+		int perPage = req.getPerPage() > 0 ? req.getPerPage() : 50;
+		Pageable pageable = PageRequest.of(page, perPage);
+
+		// 날짜 타입: 기본 approval(성적서발행일)
+		String dateType  = (req.getDateType()  == null || req.getDateType().isBlank())  ? "approval" : req.getDateType();
+		String startDate = (req.getStartDate() == null || req.getStartDate().isBlank()) ? null : req.getStartDate();
+		String endDate   = (req.getEndDate()   == null || req.getEndDate().isBlank())   ? null : req.getEndDate();
+
+		// 중/소분류: 0 → null
+		Long middleItemCodeId = req.getMiddleItemCodeId();
+		if (middleItemCodeId != null && middleItemCodeId == 0L) middleItemCodeId = null;
+		Long smallItemCodeId = req.getSmallItemCodeId();
+		if (smallItemCodeId != null && smallItemCodeId == 0L) smallItemCodeId = null;
+
+		// 검색타입: 빈값 → 'all'
+		String searchType = req.getSearchType();
+		if (searchType == null || searchType.isBlank()) searchType = "all";
+
+		String keyword = (req.getKeyword() == null) ? "" : req.getKeyword().trim();
+
+		List<ReportPrintListRow> items = reportRepository.searchReportPrintList(
+				middleItemCodeId, smallItemCodeId,
+				dateType, startDate, endDate,
+				searchType, keyword, pageable
+		);
+
+		long totalCount = reportRepository.countReportPrintList(
+				middleItemCodeId, smallItemCodeId,
+				dateType, startDate, endDate,
+				searchType, keyword
+		);
+
+		TuiGridDTO.Pagination pagination = TuiGridDTO.Pagination.builder()
+				.page(req.getPage())
+				.totalCount((int) totalCount)
+				.build();
+
+		return TuiGridDTO.ResData.<ReportPrintListRow>builder()
+				.contents(items)
+				.pagination(pagination)
+				.build();
+	}
+
+	// ── 대행성적서(AGCY) ──────────────────────────────────────────────────────
+
+	/**
+	 * 대행성적서 등록 (1회 요청에 N건 일괄 등록)
+	 * - 자체대행성적서번호: {접수번호}-D{4digits} (예: BD26-0006-D0001)
+	 * - 관리번호: BD{yy}-D{5digits} (예: BD26-D00001)
+	 * - report_num은 외부 교정기관에서 받기 전까지 null로 유지
+	 */
+	@Transactional
+	public ResMessage<Object> addAgcyReport(ReportDTO.AddAgcyReportReq request, CustomUserDetails user) {
+		LocalDateTime now = LocalDateTime.now();
+		Long userId = user.getId();
+		String workerName = user.getName();
+
+		Long caliOrderId = request.getCaliOrderId();
+		CaliOrder orderInfo = caliOrderRepository.findById(caliOrderId)
+				.orElseThrow(() -> new EntityNotFoundException("접수정보를 찾을 수 없습니다."));
+
+		String orderNum = orderInfo.getOrderNum();
+		int orderYear = orderInfo.getOrderDate().getYear();
+		String yearSuffix = String.valueOf(orderYear).substring(2);  // "26"
+
+		List<ReportDTO.AgcyItemReq> items = request.getItems();
+		if (items == null || items.isEmpty()) {
+			return new ResMessage<>(-1, "등록할 기기 목록이 없습니다.", null);
+		}
+		int count = items.size();
+
+		// 시퀀스 일괄 예약 (SELECT FOR UPDATE — 동시성 안전)
+		int agcyReportStart = numberSequenceService.reserve("report_agcy_" + caliOrderId, count);
+		int agcyManageStart = numberSequenceService.reserve("manage_agcy_" + orderYear, count);
+
+		List<Long> savedIds = new ArrayList<>();
+		for (int i = 0; i < count; i++) {
+			ReportDTO.AgcyItemReq item = items.get(i);
+
+			String agcySelfReportNum = orderNum + "-D" + String.format("%04d", agcyReportStart + i);
+			String manageNo = "BD" + yearSuffix + "-D" + String.format("%05d", agcyManageStart + i);
+
+			Integer itemCaliCycle = item.itemCaliCycle();
+			if (itemCaliCycle == null || itemCaliCycle == 0) {
+				itemCaliCycle = 12;
+			}
+
+			Report report = Report.builder()
+					.caliOrderId(caliOrderId)
+					.reportType(ReportType.AGCY)
+					.orderType(request.getOrderType())
+					.agcyAgent(request.getAgcyAgent())
+					.agcySelfReportNum(agcySelfReportNum)
+					.manageNo(manageNo)
+					.middleItemCodeId(item.middleItemCodeId())
+					.smallItemCodeId(item.smallItemCodeId())
+					.itemId(item.itemId())
+					.itemName(item.itemName())
+					.itemNameEn(item.itemNameEn())
+					.itemMakeAgent(item.itemMakeAgent())
+					.itemMakeAgentEn(item.itemMakeAgentEn())
+					.itemFormat(item.itemFormat())
+					.itemNum(item.itemNum())
+					.itemCaliCycle(itemCaliCycle)
+					.caliFee(item.caliFee() != null ? item.caliFee() : 0L)
+					.remark(item.remark())
+					.reportStatus(ReportStatus.NORMAL)
+					.isVisible(YnType.y)
+					.createMemberId(userId)
+					.createDatetime(now)
+					.build();
+
+			Report saved = reportRepository.save(report);
+			savedIds.add(saved.getId());
+
+			Log saveLog = Log.builder()
+					.createDatetime(now)
+					.createMemberId(userId)
+					.workerName(workerName)
+					.refTable("report")
+					.refTableId(saved.getId())
+					.logType("i")
+					.logContent(String.format("[대행성적서 등록] 자체대행성적서번호: %s - 고유번호: %d", agcySelfReportNum, saved.getId()))
+					.build();
+			logRepository.save(saveLog);
+		}
+
+		return new ResMessage<>(1, String.format("대행성적서 %d건이 등록되었습니다.", count), savedIds);
+	}
+
+	/**
+	 * 대행성적서 수정 모달 데이터 조회
+	 */
+	@Transactional(readOnly = true)
+	public ReportDTO.AgcyReportDetailRes getAgcyReportDetail(Long id) {
+		ReportDTO.AgcyReportDetailRes detail = reportRepository.getAgcyReportDetail(id);
+		if (detail == null) {
+			throw new EntityNotFoundException("대행성적서를 찾을 수 없습니다. id=" + id);
+		}
+		return detail;
+	}
+
+	/**
+	 * 대행성적서 수정 (단건)
+	 * - reportNum은 null이면 기존 값 유지 (외부 성적서번호를 아직 받지 못한 경우)
+	 */
+	@Transactional
+	public ResMessage<Object> updateAgcyReport(ReportDTO.UpdateAgcyReportReq req, CustomUserDetails user) {
+		Long id = req.id();
+		Report report = reportRepository.findById(id)
+				.orElseThrow(() -> new EntityNotFoundException("수정할 대행성적서를 찾을 수 없습니다. id=" + id));
+
+		if (report.getReportType() != ReportType.AGCY) {
+			throw new IllegalArgumentException("대행성적서만 수정할 수 있습니다.");
+		}
+
+		LocalDateTime now = LocalDateTime.now();
+		Long userId = user.getId();
+
+		report.setAgcyAgent(req.agcyAgent());
+		report.setMiddleItemCodeId(req.middleItemCodeId());
+		report.setSmallItemCodeId(req.smallItemCodeId());
+		if (req.itemId() != null && req.itemId() > 0) {
+			report.setItemId(req.itemId());
+		}
+		report.setItemName(req.itemName());
+		report.setItemNameEn(req.itemNameEn());
+		report.setItemMakeAgent(req.itemMakeAgent());
+		report.setItemMakeAgentEn(req.itemMakeAgentEn());
+		report.setItemFormat(req.itemFormat());
+		report.setItemNum(req.itemNum());
+		if (req.caliFee() != null) {
+			report.setCaliFee(req.caliFee());
+		}
+		report.setRemark(req.remark());
+		if (req.caliDate() != null) {
+			report.setCaliDate(req.caliDate());
+		}
+		if (req.reportNum() != null) {
+			report.setReportNum(req.reportNum());
+		}
+		report.setUpdateMemberId(userId);
+
+		Log updateLog = Log.builder()
+				.logType("u")
+				.createMemberId(userId)
+				.createDatetime(now)
+				.workerName(user.getName())
+				.refTableId(id)
+				.refTable("report")
+				.logContent(String.format("[대행성적서 수정] 자체대행성적서번호: %s - 고유번호: %d", report.getAgcySelfReportNum(), id))
+				.build();
+		logRepository.save(updateLog);
+
+		return new ResMessage<>(1, "대행성적서가 수정되었습니다.", null);
+	}
+
+	/**
+	 * 대행성적서 통합수정 (N건 partial update)
+	 * - 각 필드가 null이면 변경하지 않음
+	 * - reportStatus는 SUCCESS(완료) 또는 CANCEL(취소)만 허용
+	 */
+	@Transactional
+	public ResMessage<Object> agcyReportMultiUpdate(ReportDTO.AgcyReportMultiUpdateReq req, CustomUserDetails user) {
+		List<Long> reportIds = req.getReportIds();
+		List<Report> reports = reportRepository.findAllById(reportIds);
+
+		if (reports.size() != reportIds.size()) {
+			return new ResMessage<>(-1, "일부 대행성적서를 찾을 수 없습니다.", null);
+		}
+
+		for (Report report : reports) {
+			if (report.getReportType() != ReportType.AGCY) {
+				return new ResMessage<>(-1, "대행성적서만 통합수정할 수 있습니다. id=" + report.getId(), null);
+			}
+		}
+
+		// reportStatus 유효성 검증 (SUCCESS 또는 CANCEL만 허용)
+		if (req.getReportStatus() != null && !req.getReportStatus().isBlank()) {
+			try {
+				ReportStatus targetStatus = ReportStatus.valueOf(req.getReportStatus());
+				if (targetStatus != ReportStatus.SUCCESS && targetStatus != ReportStatus.CANCEL) {
+					return new ResMessage<>(-1, "대행성적서 상태는 SUCCESS(완료) 또는 CANCEL(취소)만 허용됩니다.", null);
+				}
+			} catch (IllegalArgumentException e) {
+				return new ResMessage<>(-1, "유효하지 않은 상태값입니다: " + req.getReportStatus(), null);
+			}
+		}
+
+		LocalDateTime now = LocalDateTime.now();
+		Long userId = user.getId();
+		List<Long> updatedIds = new ArrayList<>();
+
+		for (Report report : reports) {
+			if (req.getAgcyAgent() != null) {
+				report.setAgcyAgent(req.getAgcyAgent());
+			}
+			if (req.getCaliDate() != null) {
+				report.setCaliDate(req.getCaliDate());
+			}
+			if (req.getReportStatus() != null && !req.getReportStatus().isBlank()) {
+				report.setReportStatus(ReportStatus.valueOf(req.getReportStatus()));
+			}
+			if (req.getReportNum() != null && !req.getReportNum().isBlank()) {
+				report.setReportNum(req.getReportNum());
+			}
+			report.setUpdateMemberId(userId);
+			updatedIds.add(report.getId());
+		}
+
+		Log updateLog = Log.builder()
+				.logType("u")
+				.createMemberId(userId)
+				.createDatetime(now)
+				.workerName(user.getName())
+				.refTableId(updatedIds.get(0))
+				.refTable("report")
+				.logContent(String.format("[대행성적서 통합수정] 고유번호 - %s", updatedIds))
+				.build();
+		logRepository.save(updateLog);
+
+		return new ResMessage<>(1, String.format("대행성적서 %d건이 수정되었습니다.", reports.size()), null);
+	}
+
+	// ── 업체별교정이력조회 ─────────────────────────────────────────────────────
+
+	/**
+	 * 업체별교정이력 목록 조회
+	 *
+	 * 접근 제어:
+	 *   - 내부직원(agentId=0): 전체 성적서 조회 가능 (isInternal=1 → SQL의 OR 절로 bypass)
+	 *   - 업체계정(agentId>0): 동일 group_name 업체 id 목록에 속하는 성적서만 조회
+	 *     - groupName이 없으면 자기 자신(agentId)만 허용
+	 *
+	 * 조회 대상:
+	 *   - SELF: approval_status='SUCCESS'
+	 *   - AGCY: report_status='SUCCESS'
+	 *
+	 * @param req  필터 요청 DTO (dateType, startDate, endDate, reportType, searchType, keyword)
+	 * @param user 로그인 사용자
+	 */
+	@Transactional(readOnly = true)
+	public TuiGridDTO.ResData<AgentCaliHistoryListRow> getAgentCaliHistoryList(
+			AgentCaliHistoryDTO.ListReq req, CustomUserDetails user) {
+
+		// 로그인 사용자의 agentId 조회 (CustomUserDetails에 agentId 없으므로 Member 조회)
+		Member member = memberRepository.findByIdAndIsVisible(user.getId(), YnType.y);
+		long agentId = member.getAgentId();
+		boolean isInternal = (agentId == 0L);
+
+		List<Long> allowedAgentIds;
+		if (isInternal) {
+			// 내부직원: placeholder -1L 사용 (isInternal=1 OR 절이 항상 true → 전체 조회)
+			allowedAgentIds = List.of(-1L);
+		} else {
+			// 업체계정: 동일 group_name의 업체 id 목록 조회
+			Agent agent = agentRepository.findByIsVisibleAndId(YnType.y, agentId).orElse(null);
+			String groupName = (agent != null) ? agent.getGroupName() : null;
+			if (groupName != null && !groupName.isBlank()) {
+				allowedAgentIds = agentRepository.findIdsByGroupName(groupName);
+			} else {
+				// group_name이 없으면 자기 자신만
+				allowedAgentIds = List.of(agentId);
+			}
+		}
+
+		int page    = Math.max(req.getPage() - 1, 0);
+		int perPage = req.getPerPage() > 0 ? req.getPerPage() : 100;
+		Pageable pageable = PageRequest.of(page, perPage);
+
+		// 날짜 타입: null·공백 → 기본 approval
+		String dateType  = (req.getDateType()  == null || req.getDateType().isBlank())  ? "approval" : req.getDateType();
+		String startDate = (req.getStartDate() == null || req.getStartDate().isBlank()) ? null : req.getStartDate();
+		String endDate   = (req.getEndDate()   == null || req.getEndDate().isBlank())   ? null : req.getEndDate();
+		// null·공백 → null (전체) 유지
+		String reportType = (req.getReportType() == null || req.getReportType().isBlank()) ? null : req.getReportType();
+		// 검색타입: null·공백 → "all"
+		String searchType = (req.getSearchType() == null || req.getSearchType().isBlank()) ? "all" : req.getSearchType();
+		String keyword    = (req.getKeyword() == null) ? "" : req.getKeyword().trim();
+
+		List<AgentCaliHistoryListRow> items = reportRepository.searchAgentCaliHistoryList(
+				dateType, startDate, endDate, reportType,
+				searchType, keyword,
+				isInternal ? 1 : 0, allowedAgentIds, pageable);
+
+		long totalCount = reportRepository.countAgentCaliHistoryList(
+				dateType, startDate, endDate, reportType,
+				searchType, keyword,
+				isInternal ? 1 : 0, allowedAgentIds);
+
+		TuiGridDTO.Pagination pagination = TuiGridDTO.Pagination.builder()
+				.page(req.getPage())
+				.totalCount((int) totalCount)
+				.build();
+
+		return TuiGridDTO.ResData.<AgentCaliHistoryListRow>builder()
+				.contents(items)
+				.pagination(pagination)
+				.build();
+	}
 
 }

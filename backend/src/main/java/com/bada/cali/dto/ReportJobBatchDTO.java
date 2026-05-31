@@ -4,7 +4,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -16,88 +15,12 @@ import java.util.List;
  */
 public class ReportJobBatchDTO {
 
-    /**
-     * 성적서작성 배치 생성 요청 DTO (WRITE 타입 전용)
-     *
-     * 프론트에서 reportWrite 모달 내 샘플 행 클릭 후
-     * 확인 시 이 DTO를 POST /api/report/jobs/batches 로 전송한다.
-     */
-    @Getter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Schema(description = "성적서작성 배치 생성 요청")
-    public static class CreateWriteBatchReq {
-
-        /**
-         * 성적서작성 대상 성적서 id 목록 (1건 이상)
-         * workApproval 페이지에서 체크박스로 선택한 행들의 id,
-         * 또는 reportModify 모달에서 단건으로 호출 시 1개 원소 리스트
-         */
-        @NotEmpty(message = "대상 성적서를 1건 이상 선택해야 합니다.")
-        @Schema(description = "대상 성적서 id 목록", example = "[1, 2, 3]")
-        private List<Long> reportIds;
-
-        /**
-         * 선택한 샘플 id (sample.id)
-         * 작업서버는 이 샘플 파일을 스토리지에서 다운로드하여 성적서를 생성한다.
-         */
-        @NotNull(message = "샘플을 선택해야 합니다.")
-        @Schema(description = "선택한 샘플 id (sample.id)", example = "10")
-        private Long sampleId;
-    }
+    // ── Polling 응답 ────────────────────────────────────────────────────────
 
     /**
-     * 실무자결재 배치 생성 요청 DTO (WORK_APPROVAL 타입 전용)
-     *
-     * workApproval 페이지에서 결재 아이콘 클릭 시(단건) 또는 다중 선택 후 결재 시
-     * POST /api/report/jobs/batches/work-approval 로 전송한다.
-     */
-    @Getter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Schema(description = "실무자결재 배치 생성 요청")
-    public static class CreateWorkApprovalBatchReq {
-
-        /**
-         * 실무자결재 대상 성적서 id 목록 (1건 이상).
-         * 단건 결재 아이콘 클릭 시 1개 원소 리스트, 다중 선택 시 N개.
-         */
-        @NotEmpty(message = "대상 성적서를 1건 이상 선택해야 합니다.")
-        @Schema(description = "대상 성적서 id 목록", example = "[1, 2, 3]")
-        private List<Long> reportIds;
-    }
-
-    /**
-     * 성적서 작업 배치 생성 응답 DTO (WRITE / WORK_APPROVAL 공용)
-     * 생성된 배치 id, 대상 건수, 그리고 작업서버 트리거에 사용되는 부가 정보를 반환한다.
-     */
-    @Getter
-    @AllArgsConstructor
-    @Schema(description = "성적서 작업 배치 생성 응답")
-    public static class CreateBatchRes {
-
-        @Schema(description = "생성된 배치 id", example = "123")
-        private Long batchId;
-
-        @Schema(description = "대상 성적서 건수", example = "3")
-        private Integer totalCount;
-
-        /**
-         * WORK_APPROVAL 전용: 실무자 서명 이미지 스토리지 objectKey.
-         * 트리거 요청에 포함하여 워커가 서명 이미지를 다운로드하는 데 사용.
-         * WRITE 타입에서는 null.
-         */
-        @Schema(description = "실무자 서명 이미지 objectKey (WORK_APPROVAL 전용)", nullable = true)
-        private String workerSignImgKey;
-    }
-
-    // ── Polling / 작업서버 배치 조회 응답 ────────────────────────────────────
-
-    /**
-     * 배치 진행상황 응답 DTO (브라우저 Polling 및 작업서버 조회 공용)
+     * 배치 진행상황 응답 DTO (브라우저 Polling용)
      *
      * GET /api/report/jobs/batches/{batchId}  — 브라우저 Polling
-     * GET /api/worker/batches/{batchId}        — 작업서버 배치+item 조회
      */
     @Getter
     @AllArgsConstructor
@@ -166,80 +89,6 @@ public class ReportJobBatchDTO {
 
         @Schema(description = "처리 완료일시")
         private LocalDateTime endDatetime;
-    }
-
-    // ── 작업서버 콜백 요청 ────────────────────────────────────────────────────
-
-    /**
-     * 작업서버 → CALI item 처리 결과 콜백 요청 DTO
-     *
-     * POST /api/worker/items/{itemId}/callback
-     * 작업서버는 item 처리 시작(PROGRESS)·성공(SUCCESS)·실패(FAIL) 마다 이 DTO를 전송한다.
-     */
-    @Getter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Schema(description = "작업서버의 item 처리 결과 콜백 요청")
-    public static class ItemCallbackReq {
-
-        @NotNull(message = "status는 필수입니다.")
-        @Schema(description = "처리 상태 (PROGRESS / SUCCESS / FAIL)", example = "SUCCESS")
-        private String status;
-
-        @Schema(description = "현재 처리 단계 (예: FILLING_DATA, UPLOADING_ORIGIN)", example = "UPLOADING_ORIGIN")
-        private String step;
-
-        @Schema(description = "처리 결과 메시지 (실패 사유 등)", example = "샘플 파일을 찾을 수 없습니다.")
-        private String message;
-    }
-
-    // ── CALI → 작업서버 트리거 요청 ──────────────────────────────────────────
-
-    /**
-     * CALI → 작업서버 트리거 요청 DTO
-     *
-     * POST {app.worker.url}/api/jobs/execute
-     * 배치 생성 후 작업서버에 처리 시작을 요청할 때 전송하는 페이로드.
-     * 스토리지 접속정보가 포함되므로 DB에 저장하지 않고 요청 시에만 사용한다.
-     */
-    @Getter
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Schema(description = "CALI가 작업서버로 보내는 작업 트리거 요청")
-    public static class WorkerTriggerReq {
-
-        @Schema(description = "처리할 배치 id", example = "123")
-        private Long batchId;
-
-        @Schema(description = "작업 완료 후 콜백할 CALI 베이스 URL", example = "http://localhost:8050")
-        private String callbackBaseUrl;
-
-        @Schema(description = "CALI ↔ 작업서버 공용 API 인증 키")
-        private String workerApiKey;
-
-        @Schema(description = "스토리지 엔드포인트 URL")
-        private String storageEndpoint;
-
-        @Schema(description = "스토리지 버킷명")
-        private String storageBucketName;
-
-        @Schema(description = "스토리지 루트 디렉토리 (dev / prod)")
-        private String storageRootDir;
-
-        @Schema(description = "스토리지 액세스 키")
-        private String storageAccessKey;
-
-        @Schema(description = "스토리지 시크릿 키")
-        private String storageSecretKey;
-
-        /**
-         * WORK_APPROVAL 전용: 실무자 서명 이미지 스토리지 objectKey.
-         * 워커가 이 key로 스토리지에서 서명 이미지를 다운로드하여 엑셀에 삽입한다.
-         * WRITE 타입에서는 null.
-         */
-        @Schema(description = "실무자 서명 이미지 objectKey (WORK_APPROVAL 전용)", nullable = true)
-        private String workerSignImgKey;
     }
 
     // ── 성적서 업로드 검증 요청 ──────────────────────────────────────────────

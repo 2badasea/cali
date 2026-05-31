@@ -1,0 +1,127 @@
+<html xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/single_layout}"
+    xmlns:th="http://www.thymeleaf.org">
+
+<div layout:fragment="content">
+    <!-- 접수정보 (읽기전용) -->
+    <div class="agcy-section mb-2">
+        <div class="section-title">접수정보</div>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">신청업체</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm custAgent" readonly></div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">성적서발행처</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm reportAgent" readonly></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 성적서 정보 -->
+    <div class="agcy-section mb-2">
+        <div class="section-title">성적서 정보</div>
+        <input type="hidden" class="reportId">
+        <input type="hidden" class="itemId">
+        <div class="row">
+            <!-- 왼쪽: 공통 정보 -->
+            <div class="col-md-6">
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">대행성적서번호</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm agcySelfReportNum" readonly></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">외부성적서번호</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm reportNum" placeholder="외부 교정기관 발급 번호"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">대행의뢰처</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm agcyAgent"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">접수구분</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm orderTypeDisplay" readonly></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">교정일자</label>
+                    <div class="col-8"><input type="date" class="form-control form-control-sm caliDate"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">진행상태</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm reportStatusDisplay" readonly></div>
+                </div>
+            </div>
+            <!-- 오른쪽: 기기 정보 -->
+            <div class="col-md-6">
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">중분류</label>
+                    <div class="col-8">
+                        <select class="form-control form-control-sm middleItemCodeId"></select>
+                    </div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">소분류</label>
+                    <div class="col-8">
+                        <select class="form-control form-control-sm smallItemCodeId"></select>
+                    </div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">기기명 <span class="text-danger">*</span></label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm itemName"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">기기명(영문)</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm itemNameEn"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">제작회사</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm itemMakeAgent"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">제작회사(영문)</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm itemMakeAgentEn"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">형식</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm itemFormat"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">기기번호</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm itemNum"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">교정수수료</label>
+                    <div class="col-8"><input type="number" class="form-control form-control-sm caliFee" min="0"></div>
+                </div>
+                <div class="form-group row mb-1">
+                    <label class="col-4 col-form-label col-form-label-sm">비고</label>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm remark"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 파일 첨부 -->
+    <div class="agcy-section">
+        <div class="section-title">성적서 파일 <small class="text-muted font-weight-normal">(xlsx 1개 / pdf 1개, 동일 타입 기존 파일 삭제 후 재업로드)</small></div>
+        <div class="d-flex flex-wrap align-items-center">
+            <input type="file" class="uploadExcel d-none" accept=".xlsx">
+            <input type="file" class="uploadPdf d-none" accept=".pdf">
+            <button type="button" class="btn btn-sm btn-outline-success btnUploadExcel mr-1">
+                <i class="bi bi-file-earmark-excel"></i> EXCEL 업로드
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger btnUploadPdf mr-1">
+                <i class="bi bi-file-earmark-pdf"></i> PDF 업로드
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary searchFile">
+                <i class="bi bi-folder2-open"></i> 파일 보기
+            </button>
+        </div>
+        <div class="mt-1 selectedFileInfo small"></div>
+    </div>
+</div>
+
+</html>

@@ -14,11 +14,13 @@ import com.bada.cali.entity.Log;
 import com.bada.cali.entity.Report;
 import com.bada.cali.entity.ReportJobBatch;
 import com.bada.cali.entity.ReportJobItem;
+import com.bada.cali.repository.EquipmentRefRepository;
 import com.bada.cali.repository.FileInfoRepository;
 import com.bada.cali.repository.LogRepository;
 import com.bada.cali.repository.ReportJobBatchRepository;
 import com.bada.cali.repository.ReportJobItemRepository;
 import com.bada.cali.repository.ReportRepository;
+import com.bada.cali.repository.projection.EquipmentWriteRow;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -90,6 +92,9 @@ public class ExcelWorkServiceImpl {
     // WorkerDataServiceImpl 재활용 — 셀 설정 + 성적서 데이터 조합
     private final WorkerDataServiceImpl    workerDataService;
 
+    // 표준장비 조회 — '데이터' 시트 삽입용
+    private final EquipmentRefRepository   equipmentRefRepository;
+
     // ── ExcelWork 전용 설정 ───────────────────────────────────────────────────
 
     /** ExcelWork 미들웨어 콜백 인증 키. 비어 있으면 개발 모드 (검증 생략). */
@@ -144,7 +149,7 @@ public class ExcelWorkServiceImpl {
             }
             // 이미 READY/PROGRESS 상태인 경우 중복 요청 차단
             if (report.getWriteStatus() == AppStatus.READY || report.getWriteStatus() == AppStatus.PROGRESS) {
-                boolean hasActive = itemRepository.existsActiveBatchForReport(report.getId(), "WRITE");
+                boolean hasActive = itemRepository.existsActiveBatchForReport(report.getId(), JobType.WRITE);
                 if (hasActive) {
                     throw new IllegalArgumentException(
                             String.format("이미 작업이 진행 중인 성적서입니다. (id: %d, 번호: %s)",
@@ -265,7 +270,7 @@ public class ExcelWorkServiceImpl {
                 // 실제 활성 배치(READY/PROGRESS)가 존재하는지 확인
                 // 반려 후 재시도 등 고착 상태(활성 배치 없음)는 자동 리셋 후 재배치 허용
                 boolean hasActiveBatch = itemRepository.existsActiveBatchForReport(
-                        report.getId(), "WORK_APPROVAL");
+                        report.getId(), JobType.WORK_APPROVAL);
                 if (hasActiveBatch) {
                     throw new IllegalArgumentException(
                             String.format("이미 실무자결재가 진행 중인 성적서입니다. (id: %d)", report.getId()));
@@ -405,7 +410,7 @@ public class ExcelWorkServiceImpl {
                 // 실제 활성 배치(READY/PROGRESS)가 존재하는지 DB 에서 확인
                 // WRITE/WORK_APPROVAL 과 동일한 패턴 — 고착 상태 자동 복구 지원
                 boolean hasActiveBatch = itemRepository.existsActiveBatchForReport(
-                        report.getId(), "MANAGER_APPROVAL");
+                        report.getId(), JobType.MANAGER_APPROVAL);
                 if (hasActiveBatch) {
                     // 활성 배치가 실제로 있음 → 진행 중이므로 중복 차단
                     throw new IllegalArgumentException(
@@ -514,6 +519,109 @@ public class ExcelWorkServiceImpl {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 1-4. createPrintJob — 성적서출력 배치 생성 + excelwork:// URI 발급
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 성적서출력 작업 요청 처리.
+     *
+     * 처리 순서:
+     *  1. 성적서 조회 및 유효성 검증
+     *     - approvalStatus=SUCCESS (기술책임자결재 완료 필수)
+     *     - isPrint='n' (미출력 상태만 허용)
+     *     - signed.pdf 파일 존재 확인
+     *  2. ReportJobBatch 생성 (JobType=PRINT)
+     *  3. ReportJobItem 목록 생성
+     *  4. 로그 기록
+     *  5. excelwork:// URI 생성 + 응답 반환
+     *
+     * @param req      성적서 id 목록 + 선택 serverUrl
+     * @param memberId 요청 사용자 id (로그 기록용)
+     */
+    @Transactional
+    public ExcelWorkDTO.CreateJobRes createPrintJob(ExcelWorkDTO.CreatePrintJobReq req, Long memberId) {
+
+        List<Long> reportIds = req.getReportIds();
+
+        // ── 1. 성적서 조회 및 유효성 검증 ────────────────────────────────────
+        List<Report> reports = new ArrayList<>();
+        for (Long reportId : reportIds) {
+            Report report = reportRepository.findById(reportId)
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            String.format("성적서를 찾을 수 없습니다. (id: %d)", reportId)));
+
+            if (report.getApprovalStatus() != AppStatus.SUCCESS) {
+                throw new IllegalArgumentException(
+                        String.format("기술책임자 결재가 완료된 성적서만 출력할 수 있습니다. (id: %d, 성적서번호: %s)",
+                                reportId, report.getReportNum()));
+            }
+            if (report.getIsPrint() == YnType.y) {
+                throw new IllegalArgumentException(
+                        String.format("이미 출력된 성적서입니다. (id: %d, 성적서번호: %s)",
+                                reportId, report.getReportNum()));
+            }
+
+            // signed.pdf 파일 존재 확인
+            List<FileInfo> pdfFiles = fileInfoRepository
+                    .findByRefTableNameAndRefTableIdAndIsVisible("report", reportId, YnType.y)
+                    .stream().filter(f -> "signed_pdf".equals(f.getName())).toList();
+            if (pdfFiles.isEmpty()) {
+                throw new IllegalArgumentException(
+                        String.format("출력할 PDF 파일이 없습니다. (id: %d, 성적서번호: %s)",
+                                reportId, report.getReportNum()));
+            }
+
+            reports.add(report);
+        }
+
+        // ── 2. ReportJobBatch 생성 ────────────────────────────────────────────
+        String token = UUID.randomUUID().toString().replace("-", "");
+        ReportJobBatch batch = batchRepository.save(ReportJobBatch.builder()
+                .jobType(JobType.PRINT)
+                .requestMemberId(memberId)
+                .sampleId(null)
+                .totalCount(reportIds.size())
+                .status(BatchStatus.READY)
+                .token(token)
+                .createDatetime(LocalDateTime.now())
+                .build());
+
+        // ── 3. ReportJobItem 생성 ─────────────────────────────────────────────
+        List<ReportJobItem> items = reportIds.stream()
+                .map(reportId -> ReportJobItem.builder()
+                        .batchId(batch.getId())
+                        .reportId(reportId)
+                        .fileUuid(UUID.randomUUID().toString())
+                        .build())
+                .collect(Collectors.toList());
+        itemRepository.saveAll(items);
+
+        // ── 4. 로그 기록 ──────────────────────────────────────────────────────
+        logRepository.save(Log.builder()
+                .workerName("system")
+                .logContent(String.format(
+                        "ExcelWork 성적서출력 배치 생성 (batchId: %d, token: %s) — 고유번호 - %s",
+                        batch.getId(), token, reportIds))
+                .logType("i")
+                .refTable("report_job_batch")
+                .refTableId(batch.getId())
+                .createDatetime(LocalDateTime.now())
+                .createMemberId(memberId)
+                .build());
+
+        log.info("ExcelWork 성적서출력 배치 생성 완료 — batchId: {}, token: {}, 건수: {}",
+                batch.getId(), token, reportIds.size());
+
+        // ── 5. excelwork:// URI 생성 ─────────────────────────────────────────
+        String serverUrl = resolveServerUrl(req.getServerUrl());
+        String excelworkUri = "excelwork://process?token=" + token
+                + "&serverUrl=" + URLEncoder.encode(serverUrl, StandardCharsets.UTF_8)
+                + "&callbackKey=" + URLEncoder.encode(excelworkCallbackKey, StandardCharsets.UTF_8);
+
+        return new ExcelWorkDTO.CreateJobRes(batch.getId(), token, excelworkUri, reportIds.size());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 2. getJobByToken — 미들웨어용 잡 상세 조회 (완전한 JSON)
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -585,6 +693,24 @@ public class ExcelWorkServiceImpl {
                 data.put("qrCodeUrl",    base + "/r/" + report.getId());
             }
 
+            // WRITE 타입 전용: '데이터' 시트에 삽입할 표준장비 목록 조회 (seq ASC)
+            // 그 외 타입은 빈 리스트 전달 — 미들웨어에서 사용하지 않음
+            List<ExcelWorkDTO.EquipmentItem> equipmentList = List.of();
+            if (batch.getJobType() == JobType.WRITE) {
+                List<EquipmentWriteRow> equipRows =
+                        equipmentRefRepository.findEquipmentForWrite(item.getReportId(), YnType.y);
+                equipmentList = equipRows.stream()
+                        .map(r -> new ExcelWorkDTO.EquipmentItem(
+                                r.getSeq(),
+                                r.getName(),
+                                r.getNameEn(),
+                                r.getMakeAgent(),
+                                r.getMakeAgentEn(),
+                                r.getModelName(),
+                                r.getSerialNo()))
+                        .collect(Collectors.toList());
+            }
+
             return new ExcelWorkDTO.ItemDetail(
                     item.getId(),
                     report.getId(),
@@ -592,15 +718,17 @@ public class ExcelWorkServiceImpl {
                     item.getFileUuid(),
                     fileDownloadUrl,
                     data,
-                    itemSignImgUrl
+                    itemSignImgUrl,
+                    equipmentList
             );
         }).toList();
 
         // 작업 유형 → 미들웨어 action 문자열 변환
         String action = switch (batch.getJobType()) {
-            case WRITE           -> "report_write";
-            case WORK_APPROVAL   -> "work_approval";
+            case WRITE            -> "report_write";
+            case WORK_APPROVAL    -> "work_approval";
             case MANAGER_APPROVAL -> "manager_approval";
+            case PRINT            -> "print";
         };
 
         // WORK_APPROVAL 전용: 배치 레벨 서명 이미지 URL (하위 호환용, token 기반)
@@ -663,7 +791,7 @@ public class ExcelWorkServiceImpl {
         log.info("파일 스트리밍 요청 — fileUuid: {}, batchId: {}, reportId: {}, jobType: {}",
                 fileUuid, batch.getId(), item.getReportId(), batch.getJobType());
 
-        // jobType 분기: WRITE → 샘플 파일, WORK_APPROVAL → origin.xlsx, MANAGER_APPROVAL → signed.xlsx
+        // jobType 분기: WRITE → 샘플 파일, WORK_APPROVAL → origin.xlsx, MANAGER_APPROVAL → signed.xlsx, PRINT → signed.pdf
         if (batch.getJobType() == com.bada.cali.common.enums.JobType.WORK_APPROVAL) {
             String objectKey = storageProps.getRootDir() + "/report/" + item.getReportId() + "/origin.xlsx";
             return streamFromStorage(objectKey, "origin.xlsx",
@@ -673,6 +801,10 @@ public class ExcelWorkServiceImpl {
             String objectKey = storageProps.getRootDir() + "/report/" + item.getReportId() + "/signed.xlsx";
             return streamFromStorage(objectKey, "signed.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        if (batch.getJobType() == com.bada.cali.common.enums.JobType.PRINT) {
+            String objectKey = storageProps.getRootDir() + "/report/" + item.getReportId() + "/signed.pdf";
+            return streamFromStorage(objectKey, "signed.pdf", "application/pdf");
         }
         return streamSampleFile(batch);
     }
@@ -772,10 +904,12 @@ public class ExcelWorkServiceImpl {
         });
 
         // jobType에 따라 성적서의 다른 상태 필드를 PROGRESS로 전환
+        // PRINT 타입은 is_print가 y/n 이진값이므로 별도 PROGRESS 상태 없음 → report 필드 변경 생략
         items.forEach(item -> reportRepository.findById(item.getReportId()).ifPresent(r -> {
             switch (batch.getJobType()) {
                 case WORK_APPROVAL    -> r.setWorkStatus(AppStatus.PROGRESS);
                 case MANAGER_APPROVAL -> r.setApprovalStatus(AppStatus.PROGRESS);
+                case PRINT            -> { /* is_print는 출력 완료(콜백) 시에만 'y'로 갱신 */ }
                 default               -> r.setWriteStatus(AppStatus.PROGRESS);
             }
         }));
@@ -984,6 +1118,7 @@ public class ExcelWorkServiceImpl {
             batch.setEndDatetime(now);
 
             List<ReportJobItem> items = itemRepository.findByBatchId(batch.getId());
+            final JobType batchJobType = batch.getJobType();
             for (ReportJobItem item : items) {
                 if (item.getStatus() == JobItemStatus.SUCCESS) continue;
 
@@ -991,9 +1126,26 @@ public class ExcelWorkServiceImpl {
                 item.setEndDatetime(now);
 
                 reportRepository.findById(item.getReportId()).ifPresent(r -> {
-                    if (r.getWriteStatus() != AppStatus.SUCCESS) {
-                        r.setWriteStatus(AppStatus.IDLE);
+                    if (batchJobType == JobType.WORK_APPROVAL) {
+                        // 실무자결재 배치 취소 → workStatus만 초기화 (writeStatus는 SUCCESS 유지)
+                        if (r.getWorkStatus() != AppStatus.SUCCESS) {
+                            r.setWorkStatus(AppStatus.IDLE);
+                            r.setWorkDatetime(null);
+                        }
+                    } else {
+                        // 성적서작성(WRITE) 배치 취소 → writeStatus + workStatus 모두 초기화
+                        // 작성 파일이 없어지면 그 위의 실무자결재 결과도 무효
+                        if (r.getWriteStatus() != AppStatus.SUCCESS) {
+                            r.setWriteStatus(AppStatus.IDLE);
+                            r.setWriteDatetime(null);
+                            r.setWriteMemberId(null);
+                        }
+                        if (r.getWorkStatus() != AppStatus.SUCCESS) {
+                            r.setWorkStatus(AppStatus.IDLE);
+                            r.setWorkDatetime(null);
+                        }
                     }
+                    reportRepository.save(r);
                 });
             }
 
@@ -1118,6 +1270,9 @@ public class ExcelWorkServiceImpl {
                 report.setWriteStatus(AppStatus.IDLE);
                 report.setWriteDatetime(null);
                 report.setWriteMemberId(null);
+                // 작성 파일이 없으면 그 위의 실무자결재도 무효
+                report.setWorkStatus(AppStatus.IDLE);
+                report.setWorkDatetime(null);
                 idleNums.add(report.getReportNum());
             }
             reportRepository.save(report);
@@ -1613,6 +1768,102 @@ public class ExcelWorkServiceImpl {
                     .workerName("excelwork")
                     .logContent(String.format(
                             "ExcelWork 기술책임자결재 실패 — reportId: %d, 성적서번호: %s, 오류: %s",
+                            report.getId(), report.getReportNum(), e.getMessage()))
+                    .logType("e")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
+        }
+
+        int processed = batch.getSuccessCount() + batch.getFailCount();
+        if (processed >= batch.getTotalCount()) {
+            finalizeBatch(batch);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 13. callbackPrintItemDone — 성적서출력 단건 완료 콜백
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 미들웨어가 성적서 1건 출력 완료 후 호출.
+     *
+     * 처리 순서:
+     *  1. item 조회 + token → batch 검증 + PRINT 타입 확인
+     *  2. report.isPrint → 'y' (출력 완료)
+     *  3. item status → SUCCESS + endDatetime
+     *  4. batch.successCount++ + 전체 완료 여부 확인
+     *  5. 로그 기록
+     *
+     * @param token  잡 토큰
+     * @param itemId 완료 처리할 report_job_item.id
+     */
+    @Transactional
+    public void callbackPrintItemDone(String token, Long itemId) {
+        ReportJobBatch batch = findBatchByToken(token);
+
+        if (batch.getJobType() != JobType.PRINT) {
+            throw new IllegalArgumentException(
+                    "PRINT 배치가 아닙니다. (batchId: " + batch.getId() + ")");
+        }
+
+        ReportJobItem item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new EntityNotFoundException("item을 찾을 수 없습니다. id=" + itemId));
+
+        Report report = reportRepository.findById(item.getReportId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "성적서를 찾을 수 없습니다. id=" + item.getReportId()));
+
+        LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
+
+        try {
+            // ── 2. is_print → 'y' ─────────────────────────────────────────────
+            report.setIsPrint(YnType.y);
+
+            // ── 3. item SUCCESS ───────────────────────────────────────────────
+            item.setStatus(JobItemStatus.SUCCESS);
+            item.setEndDatetime(now);
+
+            // ── 4. batch successCount++ ───────────────────────────────────────
+            batch.setSuccessCount(batch.getSuccessCount() + 1);
+
+            // ── 5. 로그 기록 ─────────────────────────────────────────────────
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 성적서출력 완료 — reportId: %d, 성적서번호: %s",
+                            report.getId(), report.getReportNum()))
+                    .logType("u")
+                    .refTable("report")
+                    .refTableId(report.getId())
+                    .createDatetime(now)
+                    .createMemberId(batch.getRequestMemberId())
+                    .build());
+
+            log.info("성적서출력 완료 — reportId: {}, 성적서번호: {}", report.getId(), report.getReportNum());
+
+            reportRepository.save(report);
+            itemRepository.save(item);
+            batch = batchRepository.save(batch);
+
+        } catch (Exception e) {
+            log.error("callbackPrintItemDone 처리 실패 — itemId: {}, reportId: {}: {}",
+                    itemId, report.getId(), e.getMessage(), e);
+            item.setStatus(JobItemStatus.FAIL);
+            item.setEndDatetime(now);
+            item.setMessage(e.getMessage());
+            batch.setFailCount(batch.getFailCount() + 1);
+
+            logRepository.save(Log.builder()
+                    .workerName("excelwork")
+                    .logContent(String.format(
+                            "ExcelWork 성적서출력 실패 — reportId: %d, 성적서번호: %s, 오류: %s",
                             report.getId(), report.getReportNum(), e.getMessage()))
                     .logType("e")
                     .refTable("report")

@@ -51,7 +51,18 @@ public interface OrderDetailsList {
 	AppStatus getApprovalStatus();	// 기술책임자 결재상태
 	
 	String getMiddleCodeNum();	// 중분류코드
-	
+
 	String getSmallCodeNum();	// 소분류코드
-	
+
+	String getAgcyAgent();           // 대행의뢰처 (AGCY 전용, SELF 는 null)
+
+	String getAgcySelfReportNum();   // 자체대행성적서번호 (AGCY 전용, SELF 는 null)
+
+	// 파일 다운로드용 file_info.id (없으면 null)
+	// SELF: signed_xlsx / AGCY: agcy_excel
+	Long getXlsxFileId();
+
+	// SELF: signed_pdf / AGCY: agcy_pdf
+	Long getPdfFileId();
+
 }

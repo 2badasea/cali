@@ -1,6 +1,7 @@
 package com.bada.cali.repository;
 
 import com.bada.cali.common.enums.OrderType;
+import com.bada.cali.common.enums.ReportType;
 import com.bada.cali.common.enums.YnType;
 import com.bada.cali.dto.ReportDTO;
 import com.bada.cali.entity.Report;
@@ -8,8 +9,10 @@ import com.bada.cali.repository.projection.LastManageNoByType;
 import com.bada.cali.repository.projection.LastReportNumByOrderType;
 import com.bada.cali.repository.projection.OrderDetailsList;
 import com.bada.cali.repository.projection.ReportCountRow;
+import com.bada.cali.repository.projection.AgentCaliHistoryListRow;
 import com.bada.cali.repository.projection.ManagerApprovalListRow;
 import com.bada.cali.repository.projection.WorkApprovalListRow;
+import com.bada.cali.repository.projection.ReportPrintListRow;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -89,7 +92,11 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 						r.workStatus as workStatus,
 						r.approvalStatus as approvalStatus,
 						mic.codeNum as middleCodeNum,
-						sic.codeNum as smallCodeNum
+						sic.codeNum as smallCodeNum,
+						r.agcyAgent as agcyAgent,
+						r.agcySelfReportNum as agcySelfReportNum,
+					(SELECT fi.id FROM FileInfo fi WHERE fi.refTableName = 'report' AND fi.refTableId = r.id AND fi.isVisible = 'y' AND ((r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND fi.name = 'agcy_excel') OR (r.reportType = com.bada.cali.common.enums.ReportType.SELF AND fi.name = 'signed_xlsx'))) as xlsxFileId,
+					(SELECT fi.id FROM FileInfo fi WHERE fi.refTableName = 'report' AND fi.refTableId = r.id AND fi.isVisible = 'y' AND ((r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND fi.name = 'agcy_pdf') OR (r.reportType = com.bada.cali.common.enums.ReportType.SELF AND fi.name = 'signed_pdf'))) as pdfFileId
 			    	from Report r
 					LEFT JOIN ItemCode mic ON mic.id = r.middleItemCodeId
 					LEFT JOIN ItemCode sic ON sic.id = r.smallItemCodeId
@@ -97,6 +104,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			    	and r.parentId IS NULL
 			    	and r.parentScaleId IS NULL
 					and r.caliOrderId = :caliOrderId
+					and (:reportType IS NULL OR r.reportType = :reportType)
 					and (:middleItemCodeId IS NULL OR r.middleItemCodeId = :middleItemCodeId)
 					and (:smallItemCodeId IS NULL OR r.smallItemCodeId = :smallItemCodeId)
 			    	and (:orderType IS NULL OR r.orderType = :orderType)
@@ -109,6 +117,8 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			    			OR (:searchType = 'itemMakeAgent' AND r.itemMakeAgent LIKE concat('%', :keyword, '%'))
 			    			OR (:searchType = 'itemFormat' AND r.itemFormat LIKE concat('%', :keyword, '%'))
 			    			OR (:searchType = 'itemNum' AND r.itemNum LIKE concat('%', :keyword, '%'))
+			    			OR (:searchType = 'agcyAgent' AND r.agcyAgent LIKE concat('%', :keyword, '%'))
+			    			OR (:searchType = 'agcySelfReportNum' AND r.agcySelfReportNum LIKE concat('%', :keyword, '%'))
 			    			OR (:searchType = 'all' AND (
 														    			r.reportNum LIKE concat('%', :keyword, '%')
 														    			OR r.manageNo LIKE concat('%', :keyword, '%')
@@ -116,19 +126,29 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 														    			OR r.itemMakeAgent LIKE concat('%', :keyword, '%')
 														    			OR r.itemFormat LIKE concat('%', :keyword, '%')
 														    			OR r.itemNum LIKE concat('%', :keyword, '%')
+														    			OR r.agcyAgent LIKE concat('%', :keyword, '%')
+														    			OR r.agcySelfReportNum LIKE concat('%', :keyword, '%')
 			    									)
 			    			)
 			    		)
 			    	)
 			    	AND (:statusType IS NULL OR (
-			    			(:statusType = 'impossible' AND r.reportStatus = 'IMPOSSIBLE')
-			    			OR  (:statusType = 'return' AND r.reportStatus = 'REJECTED')
-			    			OR  (:statusType = 'wait' AND r.workDatetime IS NULL AND r.approvalDatetime IS NULL)
-			    			OR (:statusType = 'progress' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NULL)
-			    			OR (:statusType = 'success' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NOT NULL)
+			    			(:statusType = 'impossible' AND r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.reportStatus = 'IMPOSSIBLE')
+			    			OR (:statusType = 'return' AND r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.reportStatus = 'REJECTED')
+			    			OR (:statusType = 'cancel' AND r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND r.reportStatus = 'CANCEL')
+			    			OR (:statusType = 'wait' AND (
+			    				(r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.workDatetime IS NULL AND r.approvalDatetime IS NULL)
+			    				OR (r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND r.reportStatus = 'NORMAL')
+			    			))
+			    			OR (:statusType = 'progress' AND r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NULL)
+			    			OR (:statusType = 'success' AND (
+			    				(r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NOT NULL)
+			    				OR (r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND r.reportStatus = 'SUCCESS')
+			    			))
 			    		)
 			    	)
 					ORDER BY
+						case when r.reportType = com.bada.cali.common.enums.ReportType.AGCY then 1 else 0 end asc,
 						case
 							 when r.orderType = com.bada.cali.common.enums.OrderType.ACCREDDIT then 0
 							 when r.orderType = com.bada.cali.common.enums.OrderType.UNACCREDDIT then 1
@@ -138,8 +158,9 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			         	r.id asc
 			""")
 	List<OrderDetailsList> searchOrderDetails(
+			@Param("reportType") ReportType reportType,
 			@Param("orderType") OrderType orderType,
-			@Param("statusType") String statusType,	// 진행전체, 대기, 취소, 불가, 반려, 진행중, 완료
+			@Param("statusType") String statusType,
 			@Param("searchType") String searchType,
 			@Param("keyword") String keyword,
 			@Param("caliOrderId") Long caliOrderId,
@@ -160,6 +181,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			AND r.parentId IS NULL
 			AND r.parentScaleId IS NULL
 			AND r.caliOrderId = :caliOrderId
+			AND (:reportType IS NULL OR r.reportType = :reportType)
 			AND (:middleItemCodeId IS NULL OR r.middleItemCodeId = :middleItemCodeId)
 			AND (:smallItemCodeId IS NULL OR r.smallItemCodeId = :smallItemCodeId)
 			AND (:orderType IS NULL OR r.orderType = :orderType)
@@ -172,6 +194,8 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 					OR (:searchType = 'itemMakeAgent' AND r.itemMakeAgent LIKE concat('%', :keyword, '%'))
 					OR (:searchType = 'itemFormat' AND r.itemFormat LIKE concat('%', :keyword, '%'))
 					OR (:searchType = 'itemNum' AND r.itemNum LIKE concat('%', :keyword, '%'))
+					OR (:searchType = 'agcyAgent' AND r.agcyAgent LIKE concat('%', :keyword, '%'))
+					OR (:searchType = 'agcySelfReportNum' AND r.agcySelfReportNum LIKE concat('%', :keyword, '%'))
 					OR (:searchType = 'all' AND (
 						r.reportNum LIKE concat('%', :keyword, '%')
 						OR r.manageNo LIKE concat('%', :keyword, '%')
@@ -179,18 +203,28 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 						OR r.itemMakeAgent LIKE concat('%', :keyword, '%')
 						OR r.itemFormat LIKE concat('%', :keyword, '%')
 						OR r.itemNum LIKE concat('%', :keyword, '%')
+						OR r.agcyAgent LIKE concat('%', :keyword, '%')
+						OR r.agcySelfReportNum LIKE concat('%', :keyword, '%')
 					))
 				)
 			)
 			AND (:statusType IS NULL OR (
-				(:statusType = 'impossible' AND r.reportStatus = 'IMPOSSIBLE')
-				OR (:statusType = 'return' AND r.reportStatus = 'REJECTED')
-				OR (:statusType = 'wait' AND r.workDatetime IS NULL AND r.approvalDatetime IS NULL)
-				OR (:statusType = 'progress' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NULL)
-				OR (:statusType = 'success' AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NOT NULL)
+				(:statusType = 'impossible' AND r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.reportStatus = 'IMPOSSIBLE')
+				OR (:statusType = 'return' AND r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.reportStatus = 'REJECTED')
+				OR (:statusType = 'cancel' AND r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND r.reportStatus = 'CANCEL')
+				OR (:statusType = 'wait' AND (
+					(r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.workDatetime IS NULL AND r.approvalDatetime IS NULL)
+					OR (r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND r.reportStatus = 'NORMAL')
+				))
+				OR (:statusType = 'progress' AND r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NULL)
+				OR (:statusType = 'success' AND (
+					(r.reportType = com.bada.cali.common.enums.ReportType.SELF AND r.workDatetime IS NOT NULL AND r.approvalDatetime IS NOT NULL)
+					OR (r.reportType = com.bada.cali.common.enums.ReportType.AGCY AND r.reportStatus = 'SUCCESS')
+				))
 			))
 			""")
 	long countOrderDetails(
+			@Param("reportType") ReportType reportType,
 			@Param("orderType") OrderType orderType,
 			@Param("statusType") String statusType,
 			@Param("searchType") String searchType,
@@ -282,6 +316,50 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 							and r.isVisible = 'y'
 			""")
 	ReportDTO.ReportInfo getReportInfo(@Param("id") Long id);
+
+	/**
+	 * 대행성적서 수정 모달 데이터 조회
+	 * - AGCY 타입 성적서 + 접수 데이터 조인하여 반환
+	 */
+	@Query("""
+			select new com.bada.cali.dto.ReportDTO$AgcyReportDetailRes(
+			    r.id,
+			    r.orderType,
+			    r.agcyAgent,
+			    r.agcySelfReportNum,
+			    r.reportNum,
+			    r.caliDate,
+			    r.middleItemCodeId,
+			    r.smallItemCodeId,
+			    r.itemId,
+			    r.itemName,
+			    r.itemNameEn,
+			    r.itemMakeAgent,
+			    r.itemMakeAgentEn,
+			    r.itemFormat,
+			    r.itemNum,
+			    r.itemCaliCycle,
+			    r.caliFee,
+			    r.remark,
+			    r.reportStatus,
+			    r.statusRemark,
+			    o.custAgent,
+			    o.custAgentAddr,
+			    o.custManager,
+			    o.custManagerTel,
+			    o.reportAgent,
+			    o.reportAgentEn,
+			    o.reportAgentAddr,
+			    o.reportManager,
+			    o.reportManagerTel
+			)
+			from Report r
+			JOIN CaliOrder o ON o.id = r.caliOrderId
+			where r.id = :id
+			  and r.isVisible = 'y'
+			  and r.reportType = com.bada.cali.common.enums.ReportType.AGCY
+		""")
+	ReportDTO.AgcyReportDetailRes getAgcyReportDetail(@Param("id") Long id);
 	
 	@Query("""
 			select new com.bada.cali.dto.ReportDTO$ChildReportInfo(
@@ -664,6 +742,142 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 	);
 
 	/**
+	 * 성적서출력 목록 조회 (native query)
+	 * - 기술책임자 결재 완료(approval_status = 'SUCCESS', approval_datetime IS NOT NULL)
+	 * - 미출력(is_print = 'n'), 자체성적서(report_type = 'SELF')
+	 * - 반려/불가 상태 제외
+	 * - dateType: approval(성적서발행일, 기본), cali(교정일자)
+	 */
+	@Query(value = """
+			SELECT
+			    r.id                                                  AS id,
+			    r.report_num                                          AS reportNum,
+			    sic.code_num                                          AS codeSmallName,
+			    o.order_date                                          AS receiptDate,
+			    o.cust_agent                                          AS agentName,
+			    o.report_agent                                        AS publishName,
+			    r.item_name                                           AS itemName,
+			    r.item_num                                            AS itemNum,
+			    r.item_make_agent                                     AS manufacturer,
+			    r.item_format                                         AS modelType,
+			    r.cali_date                                           AS caliDate,
+			    (SELECT fi.id FROM file_info fi
+			         WHERE fi.ref_table_name = 'report'
+			           AND fi.ref_table_id   = r.id
+			           AND fi.name           = 'signed_xlsx'
+			           AND fi.is_visible     = 'y'
+			         LIMIT 1)                                         AS signedXlsxFileId,
+			    (SELECT fi.id FROM file_info fi
+			         WHERE fi.ref_table_name = 'report'
+			           AND fi.ref_table_id   = r.id
+			           AND fi.name           = 'signed_pdf'
+			           AND fi.is_visible     = 'y'
+			         LIMIT 1)                                         AS signedPdfFileId
+			FROM report r
+			LEFT JOIN cali_order o  ON o.id  = r.cali_order_id
+			LEFT JOIN item_code sic ON sic.id = r.small_item_code_id
+			WHERE r.is_visible        = 'y'
+			  AND r.report_type       = 'SELF'
+			  AND r.parent_scale_id   IS NULL
+			  AND r.approval_status   = 'SUCCESS'
+			  AND r.approval_datetime IS NOT NULL
+			  AND r.is_print          = 'n'
+			  AND r.report_status NOT IN ('REJECTED', 'IMPOSSIBLE')
+			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
+			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
+			  AND (
+			      :startDate IS NULL OR :endDate IS NULL OR (
+			          (:dateType = 'cali'     AND r.cali_date            BETWEEN :startDate AND :endDate)
+			          OR (:dateType = 'approval' AND r.approval_datetime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59'))
+			      )
+			  )
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'reportNum'    AND r.report_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agentName'   AND o.cust_agent     LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'publishName' AND o.report_agent   LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'    AND r.item_name      LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'     AND r.item_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'manufacturer' AND r.item_make_agent LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'modelType'   AND r.item_format    LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'all' AND (
+			                r.report_num         LIKE CONCAT('%', :keyword, '%')
+			                OR o.cust_agent      LIKE CONCAT('%', :keyword, '%')
+			                OR o.report_agent    LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_name       LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_num        LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_make_agent LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_format     LIKE CONCAT('%', :keyword, '%')
+			          ))
+			      )
+			  )
+			ORDER BY r.approval_datetime DESC, r.id DESC
+			""", nativeQuery = true)
+	List<ReportPrintListRow> searchReportPrintList(
+			@Param("middleItemCodeId") Long middleItemCodeId,
+			@Param("smallItemCodeId")  Long smallItemCodeId,
+			@Param("dateType")         String dateType,
+			@Param("startDate")        String startDate,
+			@Param("endDate")          String endDate,
+			@Param("searchType")       String searchType,
+			@Param("keyword")          String keyword,
+			Pageable pageable
+	);
+
+	/**
+	 * 성적서출력 목록 전체 건수 (searchReportPrintList 동일 WHERE 조건)
+	 */
+	@Query(value = """
+			SELECT COUNT(*)
+			FROM report r
+			LEFT JOIN cali_order o  ON o.id  = r.cali_order_id
+			WHERE r.is_visible        = 'y'
+			  AND r.report_type       = 'SELF'
+			  AND r.parent_scale_id   IS NULL
+			  AND r.approval_status   = 'SUCCESS'
+			  AND r.approval_datetime IS NOT NULL
+			  AND r.is_print          = 'n'
+			  AND r.report_status NOT IN ('REJECTED', 'IMPOSSIBLE')
+			  AND (:middleItemCodeId IS NULL OR r.middle_item_code_id = :middleItemCodeId)
+			  AND (:smallItemCodeId  IS NULL OR r.small_item_code_id  = :smallItemCodeId)
+			  AND (
+			      :startDate IS NULL OR :endDate IS NULL OR (
+			          (:dateType = 'cali'     AND r.cali_date            BETWEEN :startDate AND :endDate)
+			          OR (:dateType = 'approval' AND r.approval_datetime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59'))
+			      )
+			  )
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'reportNum'    AND r.report_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agentName'   AND o.cust_agent     LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'publishName' AND o.report_agent   LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'    AND r.item_name      LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'     AND r.item_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'manufacturer' AND r.item_make_agent LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'modelType'   AND r.item_format    LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'all' AND (
+			                r.report_num         LIKE CONCAT('%', :keyword, '%')
+			                OR o.cust_agent      LIKE CONCAT('%', :keyword, '%')
+			                OR o.report_agent    LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_name       LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_num        LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_make_agent LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_format     LIKE CONCAT('%', :keyword, '%')
+			          ))
+			      )
+			  )
+			""", nativeQuery = true)
+	long countReportPrintList(
+			@Param("middleItemCodeId") Long middleItemCodeId,
+			@Param("smallItemCodeId")  Long smallItemCodeId,
+			@Param("dateType")         String dateType,
+			@Param("startDate")        String startDate,
+			@Param("endDate")          String endDate,
+			@Param("searchType")       String searchType,
+			@Param("keyword")          String keyword
+	);
+
+	/**
 	 * 교정신청서 다운로드용 성적서 목록 조회
 	 * - 재발행 제외(parentId, parentScaleId IS NULL)
 	 * - 삭제 제외(isVisible = 'y')
@@ -678,7 +892,10 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			  AND r.isVisible = 'y'
 			  AND r.parentId IS NULL
 			  AND r.parentScaleId IS NULL
-			ORDER BY r.reportNum ASC
+			ORDER BY
+		    CASE WHEN r.reportType = com.bada.cali.common.enums.ReportType.AGCY THEN 1 ELSE 0 END ASC,
+		    CASE WHEN r.reportNum IS NULL THEN 1 ELSE 0 END ASC,
+		    r.reportNum ASC
 			""")
 	List<Report> findReportsForOrderDownload(@Param("caliOrderId") Long caliOrderId);
 
@@ -699,4 +916,191 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			GROUP BY r.caliOrderId
 			""")
 	List<ReportCountRow> countByCaliOrderIds(@Param("caliOrderIds") List<Long> caliOrderIds);
+
+	/**
+	 * 업체별교정이력조회 목록 조회 (native query)
+	 * - SELF: approval_status = SUCCESS (기술책임자결재 완료)
+	 * - AGCY: report_status = SUCCESS (대행성적서 완료 등록)
+	 * - 정렬: SELF → AGCY 순, SELF는 발행일(approval_datetime) DESC, AGCY는 교정일(cali_date) DESC
+	 * - 업체 계정: isInternal=0 → cust_agent_id IN (allowedAgentIds) 제한
+	 * - 내부 직원: isInternal=1 → 업체 제한 없음 (allowedAgentIds는 placeholder -1만 전달)
+	 * - 날짜 필터: AGCY는 dateType 무관하게 항상 cali_date 기준 (cali_date IS NULL이면 제외)
+	 *
+	 * @param dateType       cali(교정일자) / approval(발행일자, 기본)
+	 * @param startDate      시작일 (yyyy-MM-dd), null이면 날짜 필터 미적용
+	 * @param endDate        종료일 (yyyy-MM-dd), null이면 날짜 필터 미적용
+	 * @param reportType     SELF / AGCY / null(전체)
+	 * @param searchType     검색 대상 컬럼
+	 * @param keyword        검색 키워드 (빈값이면 전체)
+	 * @param isInternal     1=내부직원(전체조회), 0=업체계정(allowedAgentIds 제한)
+	 * @param allowedAgentIds 허용 cust_agent_id 목록 (isInternal=1이면 [-1] placeholder)
+	 * @param pageable       페이징
+	 */
+	@Query(value = """
+			SELECT
+			    r.id                                                      AS id,
+			    r.report_type                                             AS reportType,
+			    sic.code_num                                              AS smallCodeNum,
+			    r.report_num                                              AS reportNum,
+			    r.cali_date                                               AS caliDate,
+			    o.cust_agent                                              AS custAgent,
+			    o.report_agent                                            AS reportAgent,
+			    r.item_name                                               AS itemName,
+			    r.item_make_agent                                         AS itemMakeAgent,
+			    r.item_format                                             AS itemFormat,
+			    r.item_num                                                AS itemNum,
+			    wm.name                                                   AS workMemberName,
+			    am.name                                                   AS approvalMemberName,
+			    DATE(r.approval_datetime)                                 AS publishDate,
+			    CASE
+			        WHEN r.report_type = 'SELF' THEN
+			            (SELECT fi.id FROM file_info fi
+			             WHERE fi.ref_table_name = 'report'
+			               AND fi.ref_table_id   = r.id
+			               AND fi.name           = 'signed_xlsx'
+			               AND fi.is_visible     = 'y'
+			             LIMIT 1)
+			        WHEN r.report_type = 'AGCY' THEN
+			            (SELECT fi.id FROM file_info fi
+			             WHERE fi.ref_table_name = 'report'
+			               AND fi.ref_table_id   = r.id
+			               AND fi.name           = 'agcy_excel'
+			               AND fi.is_visible     = 'y'
+			             LIMIT 1)
+			        ELSE NULL
+			    END AS excelFileId,
+			    CASE
+			        WHEN r.report_type = 'SELF' THEN
+			            (SELECT fi.id FROM file_info fi
+			             WHERE fi.ref_table_name = 'report'
+			               AND fi.ref_table_id   = r.id
+			               AND fi.name           = 'signed_pdf'
+			               AND fi.is_visible     = 'y'
+			             LIMIT 1)
+			        WHEN r.report_type = 'AGCY' THEN
+			            (SELECT fi.id FROM file_info fi
+			             WHERE fi.ref_table_name = 'report'
+			               AND fi.ref_table_id   = r.id
+			               AND fi.name           = 'agcy_pdf'
+			               AND fi.is_visible     = 'y'
+			             LIMIT 1)
+			        ELSE NULL
+			    END AS pdfFileId
+			FROM report r
+			LEFT JOIN cali_order o  ON o.id = r.cali_order_id
+			LEFT JOIN item_code sic ON sic.id = r.small_item_code_id
+			LEFT JOIN member wm     ON wm.id  = r.work_member_id
+			LEFT JOIN member am     ON am.id  = r.approval_member_id
+			WHERE r.is_visible      = 'y'
+			  AND r.parent_scale_id IS NULL
+			  AND (
+			      (r.report_type = 'SELF' AND r.approval_status = 'SUCCESS')
+			      OR
+			      (r.report_type = 'AGCY' AND r.report_status = 'SUCCESS')
+			  )
+			  AND (:reportType IS NULL OR r.report_type = :reportType)
+			  AND (
+			      :startDate IS NULL OR :endDate IS NULL OR (
+			          (r.report_type = 'SELF' AND (
+			              (:dateType = 'approval' AND r.approval_datetime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59'))
+			              OR (:dateType = 'cali'  AND r.cali_date BETWEEN :startDate AND :endDate)
+			          ))
+			          OR (r.report_type = 'AGCY' AND r.cali_date IS NOT NULL AND r.cali_date BETWEEN :startDate AND :endDate)
+			      )
+			  )
+			  AND (:isInternal = 1 OR o.cust_agent_id IN (:allowedAgentIds))
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'reportNum'    AND r.report_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agentName'   AND o.cust_agent     LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'publishName' AND o.report_agent   LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'    AND r.item_name      LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'     AND r.item_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'manufacturer' AND r.item_make_agent LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'modelType'   AND r.item_format    LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'all' AND (
+			                r.report_num         LIKE CONCAT('%', :keyword, '%')
+			                OR o.cust_agent      LIKE CONCAT('%', :keyword, '%')
+			                OR o.report_agent    LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_name       LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_num        LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_make_agent LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_format     LIKE CONCAT('%', :keyword, '%')
+			          ))
+			      )
+			  )
+			ORDER BY
+			    CASE WHEN r.report_type = 'SELF' THEN 0 ELSE 1 END ASC,
+			    CASE WHEN r.report_type = 'SELF' THEN r.approval_datetime ELSE NULL END DESC,
+			    CASE WHEN r.report_type = 'AGCY' THEN r.cali_date ELSE NULL END DESC,
+			    r.id DESC
+			""", nativeQuery = true)
+	List<AgentCaliHistoryListRow> searchAgentCaliHistoryList(
+			@Param("dateType")        String dateType,
+			@Param("startDate")       String startDate,
+			@Param("endDate")         String endDate,
+			@Param("reportType")      String reportType,
+			@Param("searchType")      String searchType,
+			@Param("keyword")         String keyword,
+			@Param("isInternal")      int isInternal,
+			@Param("allowedAgentIds") List<Long> allowedAgentIds,
+			Pageable pageable
+	);
+
+	/**
+	 * 업체별교정이력조회 건수 (searchAgentCaliHistoryList 동일 WHERE 조건)
+	 */
+	@Query(value = """
+			SELECT COUNT(*)
+			FROM report r
+			LEFT JOIN cali_order o  ON o.id = r.cali_order_id
+			WHERE r.is_visible      = 'y'
+			  AND r.parent_scale_id IS NULL
+			  AND (
+			      (r.report_type = 'SELF' AND r.approval_status = 'SUCCESS')
+			      OR
+			      (r.report_type = 'AGCY' AND r.report_status = 'SUCCESS')
+			  )
+			  AND (:reportType IS NULL OR r.report_type = :reportType)
+			  AND (
+			      :startDate IS NULL OR :endDate IS NULL OR (
+			          (r.report_type = 'SELF' AND (
+			              (:dateType = 'approval' AND r.approval_datetime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59'))
+			              OR (:dateType = 'cali'  AND r.cali_date BETWEEN :startDate AND :endDate)
+			          ))
+			          OR (r.report_type = 'AGCY' AND r.cali_date IS NOT NULL AND r.cali_date BETWEEN :startDate AND :endDate)
+			      )
+			  )
+			  AND (:isInternal = 1 OR o.cust_agent_id IN (:allowedAgentIds))
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'reportNum'    AND r.report_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agentName'   AND o.cust_agent     LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'publishName' AND o.report_agent   LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'    AND r.item_name      LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'     AND r.item_num       LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'manufacturer' AND r.item_make_agent LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'modelType'   AND r.item_format    LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'all' AND (
+			                r.report_num         LIKE CONCAT('%', :keyword, '%')
+			                OR o.cust_agent      LIKE CONCAT('%', :keyword, '%')
+			                OR o.report_agent    LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_name       LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_num        LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_make_agent LIKE CONCAT('%', :keyword, '%')
+			                OR r.item_format     LIKE CONCAT('%', :keyword, '%')
+			          ))
+			      )
+			  )
+			""", nativeQuery = true)
+	long countAgentCaliHistoryList(
+			@Param("dateType")        String dateType,
+			@Param("startDate")       String startDate,
+			@Param("endDate")         String endDate,
+			@Param("reportType")      String reportType,
+			@Param("searchType")      String searchType,
+			@Param("keyword")         String keyword,
+			@Param("isInternal")      int isInternal,
+			@Param("allowedAgentIds") List<Long> allowedAgentIds
+	);
 }

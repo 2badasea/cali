@@ -2,10 +2,14 @@ package com.bada.cali.api;
 
 import com.bada.cali.common.ResMessage;
 import com.bada.cali.dto.ReportDTO;
+import com.bada.cali.dto.ReportPrintDTO;
 import com.bada.cali.dto.TuiGridDTO;
 import com.bada.cali.repository.projection.OrderDetailsList;
+import com.bada.cali.repository.projection.ReportPrintListRow;
 import com.bada.cali.repository.projection.WorkApprovalListRow;
 import com.bada.cali.security.CustomUserDetails;
+import com.bada.cali.entity.FileInfo;
+import com.bada.cali.service.FileServiceImpl;
 import com.bada.cali.service.ReportServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -18,6 +22,7 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -29,6 +34,7 @@ import java.util.List;
 public class ReportController {
 
 	private final ReportServiceImpl reportService;
+	private final FileServiceImpl fileService;
 
 	// 성적서 등록
 	@Operation(summary = "성적서 등록", description = "접수 건에 속하는 성적서(자체/대행, 부모/자식)를 일괄 등록함.")
@@ -250,6 +256,111 @@ public class ReportController {
 			@AuthenticationPrincipal CustomUserDetails user
 	) {
 		return ResponseEntity.ok(reportService.resetWorkStatus(req.reportIds(), user));
+	}
+
+	// 성적서출력 목록 조회
+	@Operation(summary = "성적서출력 목록 조회",
+			description = "기술책임자 결재 완료(approval_status=SUCCESS) + 미출력(is_print='n') + 자체성적서(SELF) 목록 조회. " +
+					"반려/불가 상태 제외. 기본 날짜 기준은 성적서발행일(approval_datetime), 기본 페이지당 50건.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "조회 성공"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@GetMapping("/reportPrintList")
+	public ResponseEntity<TuiGridDTO.Res<TuiGridDTO.ResData<ReportPrintListRow>>> getReportPrintList(
+			ReportPrintDTO.ListReq req) {
+
+		TuiGridDTO.ResData<ReportPrintListRow> data = reportService.getReportPrintList(req);
+		return ResponseEntity.ok(new TuiGridDTO.Res<>(true, data));
+	}
+
+	// ── 대행성적서(AGCY) ──────────────────────────────────────────────────────
+
+	@Operation(summary = "대행성적서 등록",
+			description = "접수 건에 대해 대행성적서를 N건 일괄 등록함. " +
+					"자체대행성적서번호({접수번호}-D{4digits})와 관리번호(BD{yy}-D{5digits})를 자동 채번. " +
+					"외부 성적서번호(report_num)는 외부 교정기관에서 받은 후 수정 시 입력.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "등록 성공"),
+			@ApiResponse(responseCode = "400", description = "요청 형식 오류"),
+			@ApiResponse(responseCode = "404", description = "접수 정보 없음"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PostMapping("/addAgcyReport")
+	public ResponseEntity<ResMessage<?>> addAgcyReport(
+			@Valid @RequestBody ReportDTO.AddAgcyReportReq request,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		ResMessage<Object> res = reportService.addAgcyReport(request, user);
+		return ResponseEntity.ok(res);
+	}
+
+	@Operation(summary = "대행성적서 단건 조회",
+			description = "수정 모달에서 사용할 대행성적서 상세 정보를 조회함. 접수 업체/발행처 정보 포함.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "조회 성공"),
+			@ApiResponse(responseCode = "404", description = "대행성적서 없음"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@GetMapping("/getAgcyReportDetail")
+	public ResponseEntity<ResMessage<ReportDTO.AgcyReportDetailRes>> getAgcyReportDetail(
+			@Parameter(description = "성적서 ID") @RequestParam Long id
+	) {
+		ReportDTO.AgcyReportDetailRes res = reportService.getAgcyReportDetail(id);
+		return ResponseEntity.ok(new ResMessage<>(1, null, res));
+	}
+
+	@Operation(summary = "대행성적서 수정",
+			description = "대행성적서 기본정보(대행의뢰처, 기기정보, 교정일자, 외부 성적서번호 등)를 수정함. " +
+					"reportNum이 null이면 기존 값 유지(외부 성적서번호를 아직 받지 못한 경우).")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "수정 성공"),
+			@ApiResponse(responseCode = "400", description = "요청 형식 오류 또는 AGCY 타입 아님"),
+			@ApiResponse(responseCode = "404", description = "성적서 없음"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PatchMapping("/updateAgcyReport")
+	public ResponseEntity<ResMessage<?>> updateAgcyReport(
+			@Valid @RequestBody ReportDTO.UpdateAgcyReportReq req,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		ResMessage<Object> res = reportService.updateAgcyReport(req, user);
+		return ResponseEntity.ok(res);
+	}
+
+	@Operation(summary = "대행성적서 통합수정",
+			description = "선택된 복수의 대행성적서에 대행의뢰처·교정일자·진행상태·외부 성적서번호를 일괄 수정함. " +
+					"null인 항목은 변경하지 않음. reportStatus는 SUCCESS(완료) 또는 CANCEL(취소)만 허용.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "수정 성공"),
+			@ApiResponse(responseCode = "400", description = "요청 형식 오류 또는 상태값 오류"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PatchMapping("/agcyReportMultiUpdate")
+	public ResponseEntity<ResMessage<?>> agcyReportMultiUpdate(
+			@Valid @RequestBody ReportDTO.AgcyReportMultiUpdateReq req,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		ResMessage<Object> res = reportService.agcyReportMultiUpdate(req, user);
+		return ResponseEntity.ok(res);
+	}
+
+	// 대행성적서 파일 업로드 (xlsx 또는 pdf, 각 타입별 1개 제한)
+	@Operation(summary = "대행성적서 파일 업로드",
+			description = "AGCY 성적서에 xlsx 또는 pdf 파일을 업로드. 동일 타입 파일이 이미 존재하면 400 반환 (삭제 후 재업로드 필요)")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "업로드 성공"),
+			@ApiResponse(responseCode = "400", description = "허용되지 않은 확장자 또는 파일 중복"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PostMapping(value = "/agcyUploadFile", consumes = "multipart/form-data")
+	public ResponseEntity<ResMessage<Long>> agcyUploadFile(
+			@RequestParam Long reportId,
+			@RequestPart("file") MultipartFile file,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		FileInfo saved = fileService.uploadAgcyReportFile(reportId, file, user.getId());
+		return ResponseEntity.ok(new ResMessage<>(1, "파일 업로드 성공", saved.getId()));
 	}
 
 }

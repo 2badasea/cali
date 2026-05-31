@@ -704,11 +704,9 @@ $(function () {
 			const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
 			$modal.grid.getPagination().movePageTo(currentPage);
 		})
-		// 버튼: 비정상 종료 복구 (스마트 복구)
-		// 1) 체크된 항목 없으면 warning
-		// 2) writeStatus 가 READY 또는 PROGRESS 인 항목만 대상 (SUCCESS 는 이미 완료이므로 제외)
-		// 3) GET /api/excelwork/recover-preview → 스토리지 파일 존재 여부 확인 후 예상 결과 미리보기
-		// 4) 확인 후 PATCH /api/excelwork/smart-recover → 파일 있음: SUCCESS 완료처리 / 파일 없음: IDLE 초기화
+		// 버튼: 비정상 종료 복구
+		// [성적서작성 고착] writeStatus READY/PROGRESS → 스마트 복구 (스토리지 파일 체크 후 SUCCESS 또는 IDLE)
+		// [실무자결재 고착] workStatus READY/PROGRESS (writeStatus=SUCCESS) → 배치 취소 후 IDLE 초기화
 		.on('click', '.btnWriteReset', async function () {
 			const checkedRows = $modal.grid.getCheckedRows();
 			if (!checkedRows || checkedRows.length === 0) {
@@ -716,14 +714,58 @@ $(function () {
 				return;
 			}
 
-			// READY/PROGRESS 상태인 항목만 대상 (SUCCESS 는 이미 완료)
-			const targetRows = checkedRows.filter(r => r.writeStatus === 'READY' || r.writeStatus === 'PROGRESS');
-			if (targetRows.length === 0) {
-				gToast('복구 대상 항목이 없습니다. (작성대기/작성중 상태만 복구 가능)', 'warning');
+			// 성적서작성 고착 → 스마트 복구 대상
+			const writeStuckRows = checkedRows.filter(r => r.writeStatus === 'READY' || r.writeStatus === 'PROGRESS');
+			// 실무자결재 고착 → 단순 초기화 대상 (writeStatus=SUCCESS이지만 workStatus가 READY/PROGRESS)
+			const workStuckRows = checkedRows.filter(r =>
+				r.writeStatus !== 'READY' && r.writeStatus !== 'PROGRESS' &&
+				(r.workStatus === 'READY' || r.workStatus === 'PROGRESS')
+			);
+
+			if (writeStuckRows.length === 0 && workStuckRows.length === 0) {
+				gToast('복구 대상 항목이 없습니다. (작성대기/작성중 또는 결재대기/결재중 상태만 복구 가능)', 'warning');
 				return;
 			}
 
-			const reportIds = targetRows.map(r => r.id);
+			// ── 실무자결재 고착 복구 (writeStatus=SUCCESS, workStatus=READY/PROGRESS) ───────
+			if (workStuckRows.length > 0 && writeStuckRows.length === 0) {
+				const workStuckNums = workStuckRows.map(r => r.reportNum ?? `#${r.id}`).join(', ');
+				const confirmResult = await gMessage(
+					'실무자결재 비정상종료 복구',
+					`<div class="text-start">
+						<p class="mb-2">아래 성적서의 실무자결재 진행 상태를 <strong>초기화(대기)</strong>합니다.</p>
+						<p class="mb-3 small text-muted">${workStuckNums}</p>
+						<div class="alert alert-warning small mb-0 p-2">
+							⚠ ExcelWork 앱이 현재 실행 중이라면 진행 중인 작업이 강제로 중단됩니다.
+						</div>
+					</div>`,
+					'question',
+					'confirm',
+					{ confirmButtonText: '복구 실행', cancelButtonText: '취소' }
+				);
+				if (!confirmResult.isConfirmed) return;
+
+				try {
+					gLoadingMessage('복구 처리 중...');
+					const res = await fetch('/api/excelwork/reset', {
+						method: 'PATCH',
+						headers: { 'Content-Type': 'application/json; charset=utf-8' },
+						body: JSON.stringify({ reportIds: workStuckRows.map(r => r.id) }),
+					});
+					swal.close();
+					if (!res.ok) throw res;
+					await gMessage('복구 완료', `${workStuckRows.length}건의 실무자결재 상태가 초기화되었습니다.`, 'success', 'alert');
+					const currentPage = $modal.grid.getPagination()?.getCurrentPage() ?? 1;
+					$modal.grid.getPagination().movePageTo(currentPage);
+				} catch (err) {
+					swal.close();
+					await gApiErrorHandler(err);
+				}
+				return;
+			}
+
+			// ── 성적서작성 고착 복구 (기존 스마트 복구 흐름) ─────────────────────────────────
+			const reportIds = writeStuckRows.map(r => r.id);
 
 			try {
 				// ── Step 1. 스토리지 파일 존재 여부 미리 확인 ─────────────────────

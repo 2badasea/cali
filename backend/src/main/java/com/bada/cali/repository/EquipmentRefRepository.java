@@ -3,6 +3,7 @@ package com.bada.cali.repository;
 import com.bada.cali.common.enums.YnType;
 import com.bada.cali.entity.StandardEquipmentRef;
 import com.bada.cali.repository.projection.ConflictEquipmentRow;
+import com.bada.cali.repository.projection.EquipmentWriteRow;
 import com.bada.cali.repository.projection.UsedEquipmentListPr;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,6 +41,29 @@ public interface EquipmentRefRepository extends JpaRepository<StandardEquipmentR
 			Pageable pageable
 	);
 	
+	// 성적서작성 시 '데이터' 시트에 삽입할 표준장비 목록 조회 (seq ASC)
+	@Query("""
+        select
+            er.seq         as seq,
+            e.name         as name,
+            e.nameEn       as nameEn,
+            e.makeAgent    as makeAgent,
+            e.makeAgentEn  as makeAgentEn,
+            e.modelName    as modelName,
+            e.serialNo     as serialNo
+        from StandardEquipmentRef er
+        left join StandardEquipment e
+            on e.id = er.equipmentId
+           and e.isVisible = :isVisible
+        where er.refTable   = 'report'
+          and er.refTableId = :reportId
+        order by er.seq asc
+    """)
+	List<EquipmentWriteRow> findEquipmentForWrite(
+			@Param("reportId") Long reportId,
+			@Param("isVisible") YnType isVisible
+	);
+
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("""
 			DELETE

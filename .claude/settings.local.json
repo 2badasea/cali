@@ -39,7 +39,16 @@
       "Bash(JAVA_HOME=\"C:/Program Files/Java/jdk-17\" ./gradlew compileJava)",
       "Bash(where java *)",
       "PowerShell(Get-Command java)",
-      "PowerShell(java -version 2>&1)"
+      "PowerShell(java -version 2>&1)",
+      "PowerShell(pip install openpyxl --quiet 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\gnjqt\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python310\\\\python.exe\" -c \"import openpyxl; print\\('ok'\\)\")",
+      "Bash(./gradlew compileJava)",
+      "PowerShell(head -1)",
+      "PowerShell($env:JAVA_HOME)",
+      "Read(//c//**)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\.gradle\\\\jdks\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"C:\\\\Users\\\\gnjqt\\\\.jdks\" -ErrorAction SilentlyContinue | Select-Object Name)",
+      "Bash(JAVA_HOME=\"C:\\\\Users\\\\gnjqt\\\\.jdks\\\\corretto-17.0.18\" \"C:\\\\BadaDev\\\\cali\\\\backend\\\\gradlew.bat\" -p \"C:\\\\BadaDev\\\\cali\\\\backend\" compileJava)",
+      "Bash(python3 -c ' *)"
     ],
     "additionalDirectories": [
       "C:\\BadaDev\\my-obsidian\\개발공부\\architecture",

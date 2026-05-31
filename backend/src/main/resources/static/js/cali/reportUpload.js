@@ -362,17 +362,18 @@ $(function () {
 	});
 
 	// =====================================================================
-	// doWorkApprovalFromModal: 업로드 모달에서 결재 배치 생성 + 폴링
-	// workApproval.js의 doWorkApproval과 동일한 폴링 로직, confirm 생략
+	// doWorkApprovalFromModal: 업로드 모달에서 결재 배치 생성 → ExcelWorkApp 실행 → 백그라운드 폴링
+	// ExcelWork 방식: workApproval.js의 doWorkApproval과 동일한 패턴, confirm 생략
+	// 완료 시 모달 닫기 → 부모 workApproval.js에서 그리드 재조회
 	// =====================================================================
 	async function doWorkApprovalFromModal(reportIds) {
 		if (!reportIds || reportIds.length === 0) return;
 
-		// 배치 생성
-		let batchId;
+		// ── Step 1. 배치 생성 (ExcelWork 방식) ────────────────────────────────
+		let batchId, excelworkUri;
 		try {
 			gLoadingMessage('실무자결재 작업을 준비합니다.');
-			const res = await fetch('/api/report/jobs/batches/work-approval', {
+			const res = await fetch('/api/excelwork/batches/work-approval', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json; charset=utf-8' },
 				body: JSON.stringify({ reportIds }),
@@ -381,7 +382,8 @@ $(function () {
 			if (!res.ok) throw res;
 			const resData = await res.json();
 			if (resData?.code > 0) {
-				batchId = resData.data.batchId;
+				batchId      = resData.data.batchId;
+				excelworkUri = resData.data.excelworkUri;
 			} else {
 				await gMessage('오류', resData.msg ?? '배치 생성 중 오류가 발생했습니다.', 'error', 'alert');
 				return;
@@ -392,75 +394,18 @@ $(function () {
 			return;
 		}
 
-		// 폴링 UI
-		const STEP_LABEL = {
-			DOWNLOADING_ORIGIN: 'origin 다운로드',
-			INSERTING_SIGN: '서명 삽입',
-			CONVERTING_PDF: 'PDF 변환',
-			UPLOADING_SIGNED: '파일 업로드',
-			DONE: '완료',
-		};
+		// ── Step 2. ExcelWorkApp 실행 ─────────────────────────────────────────
+		// excelwork:// URI로 로컬 ExcelWorkApp을 기동.
+		// ExcelWorkApp이 서명 삽입 + PDF 변환 + 업로드를 처리하며 앱 내 작업 목록에 진행상황 표시.
+		window.location.href = excelworkUri;
 
-		const buildProgressHtml = (batch) => {
-			const total = batch.totalCount ?? 0;
-			const success = batch.successCount ?? 0;
-			const fail = batch.failCount ?? 0;
-			const done = success + fail;
-			const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+		// ── Step 3. 백그라운드 폴링 — 완료 시 모달 닫기 ───────────────────────
+		// 진행상황은 ExcelWorkApp 작업 목록에서 확인.
+		const MAX_POLL_COUNT = 120; // 최대 10분 (5초 × 120회)
+		const POLL_INTERVAL  = 5000;
 
-			const itemRows = (batch.items ?? [])
-				.map((item) => {
-					const badge =
-						item.status === 'SUCCESS'
-							? '<span class="badge bg-success">완료</span>'
-							: item.status === 'FAIL'
-								? '<span class="badge bg-danger">실패</span>'
-								: item.status === 'PROGRESS'
-									? `<span class="badge bg-primary">${STEP_LABEL[item.step] ?? item.step ?? '처리중'}</span>`
-									: '<span class="badge bg-secondary">대기</span>';
-					const failMsg = item.message ? `<br><small class="text-danger">${item.message}</small>` : '';
-					return `<tr>
-					<td class="text-start" style="font-size:0.85em;">성적서 #${item.reportId}</td>
-					<td>${badge}${failMsg}</td>
-				</tr>`;
-				})
-				.join('');
-
-			return `
-				<div class="mb-2">
-					<div class="d-flex justify-content-between mb-1" style="font-size:0.85em;">
-						<span>${done} / ${total}건 처리됨</span><span>${pct}%</span>
-					</div>
-					<div class="progress" style="height:12px;">
-						<div class="progress-bar progress-bar-striped progress-bar-animated"
-							role="progressbar" style="width:${pct}%;"></div>
-					</div>
-				</div>
-				<div style="max-height:200px; overflow-y:auto;">
-					<table class="table table-sm table-bordered mb-0" style="font-size:0.85em;">
-						<tbody>${itemRows}</tbody>
-					</table>
-				</div>`;
-		};
-
-		Swal.fire({
-			title: '실무자결재 처리 중...',
-			html: '<div id="uploadApprovalProgressBody">준비 중...</div>',
-			allowOutsideClick: false,
-			allowEscapeKey: false,
-			showConfirmButton: false,
-			didOpen: () => {
-				Swal.showLoading();
-			},
-		});
-
-		const POLL_INTERVAL_MS = 5000;
-		const MAX_POLL_COUNT = 60;
-		let pollCount = 0;
-
-		while (pollCount < MAX_POLL_COUNT) {
-			await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-			pollCount++;
+		for (let pollCount = 0; pollCount < MAX_POLL_COUNT; pollCount++) {
+			await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
 
 			try {
 				const pollRes = await fetch(`/api/report/jobs/batches/${batchId}`);
@@ -469,12 +414,8 @@ $(function () {
 				if (!pollData || pollData.code <= 0) continue;
 
 				const batch = pollData.data;
-				const progressEl = document.getElementById('uploadApprovalProgressBody');
-				if (progressEl) progressEl.innerHTML = buildProgressHtml(batch);
 
 				if (['SUCCESS', 'FAIL', 'CANCELED'].includes(batch.status)) {
-					Swal.hideLoading();
-
 					if (batch.status === 'SUCCESS') {
 						const icon = batch.failCount > 0 ? 'warning' : 'success';
 						await gMessage('실무자결재 완료', `성공 ${batch.successCount}건 / 실패 ${batch.failCount}건`, icon, 'alert');
@@ -483,17 +424,18 @@ $(function () {
 					} else {
 						await gMessage('작업 취소', '작업이 취소되었습니다.', 'info', 'alert');
 					}
-					break;
+
+					// 모달 닫기 → 부모 workApproval.js에서 그리드 재조회
+					$modal_root.modal('hide');
+					return;
 				}
 			} catch (pollErr) {
-				console.warn('[reportUpload] Polling 오류:', pollErr);
+				console.warn('[reportUpload] 폴링 오류:', pollErr);
 			}
 		}
 
-		if (pollCount >= MAX_POLL_COUNT) {
-			Swal.close();
-			await gMessage('시간 초과', '작업 진행상황을 확인할 수 없습니다.<br>잠시 후 다시 확인해 주세요.', 'warning', 'alert');
-		}
+		// 시간 초과
+		await gMessage('시간 초과', '작업 진행상황을 확인할 수 없습니다.<br>잠시 후 다시 확인해 주세요.', 'warning', 'alert');
 	}
 
 	// =====================================================================

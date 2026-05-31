@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/layout}"
+    xmlns:th="http://www.thymeleaf.org">
+
+<body>
+    <div layout:fragment="content">
+        <div class="wrapper">
+            <form class="searchForm mb-1" name="searchForm">
+                <div class="d-flex flex-wrap align-items-center mb-1" style="gap: 4px;">
+
+                    <!-- 좌측: 기능 버튼 + 행 수 -->
+                    <div class="d-flex align-items-center flex-wrap" style="gap: 4px;">
+                        <!-- 일괄다운로드 dropdown -->
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-secondary dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                일괄다운로드
+                            </button>
+                            <div class="dropdown-menu">
+                                <button type="button" class="dropdown-item btnDownloadExcel">EXCEL</button>
+                                <button type="button" class="dropdown-item btnDownloadPdf">PDF</button>
+                            </div>
+                        </div>
+
+                        <!-- 행 수 -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text">행 수</span>
+                            </div>
+                            <select class="form-control form-control-sm rowLeng">
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100" selected>100</option>
+                                <option value="200">200</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 우측: 검색 필터 -->
+                    <div class="ml-auto d-flex align-items-center" style="gap: 4px; flex-wrap: nowrap;">
+
+                        <!-- 성적서 유형 -->
+                        <div class="input-group input-group-sm" style="width: 90px;">
+                            <select class="form-control form-control-sm" name="reportType" style="width: 90px;">
+                                <option value="" selected>전체</option>
+                                <option value="SELF">자체</option>
+                                <option value="AGCY">대행</option>
+                            </select>
+                        </div>
+
+                        <!-- 날짜 타입 -->
+                        <div class="input-group input-group-sm" style="width: 100px;">
+                            <select class="form-control form-control-sm" name="dateType" style="width: 100px;">
+                                <option value="approval" selected>발행일자</option>
+                                <option value="cali">교정일자</option>
+                            </select>
+                        </div>
+
+                        <!-- 기간 -->
+                        <div class="input-group input-group-sm" style="width: fit-content; flex-wrap: nowrap !important;">
+                            <input type="date" class="form-control" name="startDate" style="width: 125px;" />
+                            <span class="input-group-text" style="border: none; padding: 0 4px; background: transparent;">~</span>
+                            <input type="date" class="form-control" name="endDate" style="width: 125px;" />
+                        </div>
+
+                        <!-- 검색타입 + 키워드 -->
+                        <div class="input-group input-group-sm">
+                            <select class="form-control form-control-sm" name="searchType" style="width: 90px; margin-right: 5px;">
+                                <option value="" selected>전체</option>
+                                <option value="agentName">신청업체</option>
+                                <option value="publishName">성적서발행처</option>
+                                <option value="itemName">기기명</option>
+                                <option value="manufacturer">제작회사</option>
+                                <option value="modelType">형식</option>
+                                <option value="itemNum">기기번호</option>
+                                <option value="reportNum">성적서번호</option>
+                            </select>
+                            <input type="text" class="form-control form-control-sm" name="keyword" style="width: 80px;" />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </div>
+
+                </div>
+            </form>
+
+            <div class="grid customerCaliHistoryList"></div>
+        </div>
+    </div>
+</body>
+
+</html>

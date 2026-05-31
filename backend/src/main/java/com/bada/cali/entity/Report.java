@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
 		name = "report",
 		uniqueConstraints = {        // 성적서번호 유니크 제약
 				@UniqueConstraint(name = "report_num", columnNames = "report_num"),
-				@UniqueConstraint(name = "manage_no", columnNames = "manage_no")
+				@UniqueConstraint(name = "manage_no", columnNames = "manage_no"),
+				@UniqueConstraint(name = "agcy_self_report_num", columnNames = "agcy_self_report_num")
 		},
 		indexes = {        // where조건으로 자주 사용되는 필드에 대해서 인덱스 생성
 				@Index(name = "is_visible", columnList = "is_visible"),
@@ -41,10 +42,14 @@ public class Report {
 	@Builder.Default
 	private PriorityType priorityType = PriorityType.NORMAL;
 	
-	// 성적서번호 (NULL을 허용한다. 자식성적서는 성적서번호가 부모를 따라감)
+	// 성적서번호 (NULL을 허용한다. 자식성적서는 성적서번호가 부모를 따라감. AGCY는 대행의뢰처로부터 받기 전까지 NULL)
 	@Column(name = "report_num", length = 200)
 	private String reportNum;
-	
+
+	// 자체대행성적서번호 (AGCY 전용, 예: BD26-0006-D0001)
+	@Column(name = "agcy_self_report_num", length = 100)
+	private String agcySelfReportNum;
+
 	// 부모성적서 id
 	@Column(name = "parent_id")
 	private Long parentId;
@@ -84,6 +89,10 @@ public class Report {
 	@Enumerated(EnumType.STRING)
 	@Builder.Default
 	private ReportType reportType = ReportType.SELF;
+
+	// 대행의뢰처 (AGCY 전용 — 대행을 맡기는 외부 교정기관명)
+	@Column(name = "agcy_agent", length = 200)
+	private String agcyAgent;
 	
 	// 접수타입 (ACCREDDIT: 공인, UNACCREDDIT: 비공식, TESTING: 시험)
 	@Column(name = "order_type", nullable = false, length = 10)
@@ -229,6 +238,12 @@ public class Report {
 	private AppStatus approvalStatus = AppStatus.IDLE;    // 기본 대기 상태
 	
 	
+	// 출력여부 (n: 미출력, y: 출력완료) — ExcelWorkApp 콜백에서 y로 변경
+	@Column(name = "is_print", nullable = false, length = 1)
+	@Enumerated(EnumType.STRING)
+	@Builder.Default
+	private YnType isPrint = YnType.n;
+
 	// 삭제유무
 	@Column(name = "is_visible", nullable = false)
 	@Enumerated(EnumType.STRING)

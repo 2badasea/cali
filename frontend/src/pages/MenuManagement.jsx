@@ -228,8 +228,8 @@ function MenuForm({ mode, form, onChange, onSave, onCheckCode, codeChecked }) {
           <input
             className="menu-form-input"
             value={form.menuCode}
-            onChange={(e) => onChange("menuCode", e.target.value.toUpperCase())}
-            placeholder="예: WORK_APPROVAL"
+            onChange={(e) => onChange("menuCode", e.target.value.toLowerCase())}
+            placeholder="예: work_approval"
             maxLength={50}
           />
           <button className="menu-form-check-btn" onClick={onCheckCode}>

@@ -187,7 +187,7 @@ $(function () {
 						return `<button type='button' class='btn btn-link w-100 h-100 rounded-0 p-0' title='교정신청서 다운로드'><i class="bi bi-file-earmark-excel text-success fs-5"></i></button>`;
 					} else {
 						// 성적서가 없으면 '-' 만 표시
-						return '-';
+						return `<span>-</span>`;
 					}
 				},
 			},

@@ -59,11 +59,32 @@ public class CaliController {
 		return "cali/registerMultiReport";
 	}
 	
-	// 성적서 수정 [모달]
+	// 성적서 수정 [모달] (SELF 전용)
 	@PostMapping(value = "/reportModify")
 	public String reportModify() {
 		log.info("성적서 수정 모달 호출");
 		return "cali/reportModify";
+	}
+
+	// 대행성적서 등록 모달 (orderDetails 페이지에서 gModal로 호출)
+	@PostMapping(value = "/agcyRegisterReport")
+	public String agcyRegisterReport() {
+		log.info("대행성적서 등록 모달 호출");
+		return "cali/agcyRegisterReport";
+	}
+
+	// 대행성적서 수정 모달 (orderDetails 페이지에서 gModal로 호출)
+	@PostMapping(value = "/agcyReportModify")
+	public String agcyReportModify() {
+		log.info("대행성적서 수정 모달 호출");
+		return "cali/agcyReportModify";
+	}
+
+	// 대행성적서 통합수정 모달 (orderDetails 페이지에서 gModal로 호출)
+	@PostMapping(value = "/agcyReportMultiUpdate")
+	public String agcyReportMultiUpdate() {
+		log.info("대행성적서 통합수정 모달 호출");
+		return "cali/agcyReportMultiUpdate";
 	}
 
 	// 실무자결재 페이지 이동
@@ -103,6 +124,20 @@ public class CaliController {
 	@PostMapping(value = "/reportReject")
 	public String reportReject() {
 		return "cali/reportReject";
+	}
+
+	// 성적서출력 페이지 이동
+	@GetMapping(value = "/reportPrint")
+	public String reportPrint(Model model) {
+		model.addAttribute("title", "성적서출력");
+		return "cali/reportPrint";
+	}
+
+	// 업체별교정이력조회 페이지 이동
+	@GetMapping(value = "/customerCaliHistory")
+	public String customerCaliHistory(Model model) {
+		model.addAttribute("title", "업체별교정이력조회");
+		return "cali/customerCaliHistory";
 	}
 
 	// 출장일정 페이지 이동

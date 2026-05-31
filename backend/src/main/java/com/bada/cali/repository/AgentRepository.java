@@ -157,6 +157,13 @@ public interface AgentRepository extends JpaRepository<Agent, Long> {
 			and replace(a.name, ' ', '') like concat('%', :agentName, '%')
 			""")
 	List<AgentDTO.AgentRowView> chkAgentInfos(@Param("agentName") String agentName);
-	
-	
+
+	/**
+	 * 업체별교정이력조회 — 그룹명이 동일한 업체 id 목록 조회.
+	 * 업체 사용자가 동일 그룹관리의 다른 업체 성적서도 조회할 수 있도록 허용하기 위한 용도.
+	 */
+	@Query("SELECT a.id FROM Agent a WHERE a.isVisible = 'y' AND a.groupName = :groupName")
+	List<Long> findIdsByGroupName(@Param("groupName") String groupName);
+
+
 }

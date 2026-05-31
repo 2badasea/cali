@@ -302,6 +302,98 @@ public class FileServiceImpl {
 		}
 	}
 
+	/**
+	 * 대행성적서(AGCY) 파일 업로드.
+	 *
+	 * xlsx → name='agcy_excel' / pdf → name='agcy_pdf' 로 file_info에 등록한다.
+	 * 같은 타입(name)의 기존 파일이 존재하면 업로드를 거부한다 (먼저 삭제 후 업로드 필요).
+	 * S3 경로: {rootDir}/report/{reportId}/{fileInfoId}.{extension}
+	 *
+	 * @param reportId  성적서 id (AGCY 타입이어야 함)
+	 * @param file      업로드할 파일 (xlsx 또는 pdf)
+	 * @param userId    업로드 요청자 id
+	 * @return 저장된 FileInfo
+	 * @throws IllegalArgumentException 확장자 불일치 또는 동일 타입 파일 이미 존재 시
+	 */
+	@Transactional
+	public FileInfo uploadAgcyReportFile(Long reportId, MultipartFile file, Long userId) {
+		String originName = file.getOriginalFilename();
+		if (originName == null) {
+			originName = "";
+		}
+		// 브라우저에 따라 경로가 포함될 수 있으므로 파일명만 추출
+		originName = originName.substring(originName.lastIndexOf("\\") + 1)
+				.substring(originName.lastIndexOf("/") + 1);
+
+		String extension = getFileExtension(originName).toLowerCase();
+
+		// 확장자 검증: xlsx, pdf만 허용
+		if (!extension.equals("xlsx") && !extension.equals("pdf")) {
+			throw new IllegalArgumentException("xlsx 또는 pdf 파일만 업로드 가능합니다.");
+		}
+
+		// 파일 역할 구분: xlsx → agcy_excel, pdf → agcy_pdf
+		String agcyType = extension.equals("xlsx") ? "agcy_excel" : "agcy_pdf";
+
+		// 동일 타입 파일 존재 시 거부 (사용자가 먼저 삭제해야 함)
+		boolean alreadyExists = fileInfoRepository.existsByRefTableNameAndRefTableIdAndNameAndIsVisible(
+				"report", reportId, agcyType, YnType.y);
+		if (alreadyExists) {
+			throw new IllegalArgumentException(
+					(extension.equals("xlsx") ? "Excel" : "PDF") + " 파일이 이미 존재합니다. 기존 파일을 삭제한 후 업로드해 주세요.");
+		}
+
+		String dir = "report/" + reportId + "/";
+		String bucket = storageProps.getBucketName();
+		String rootDir = storageProps.getRootDir();
+		LocalDateTime now = LocalDateTime.now();
+
+		// 콘텐츠타입 결정
+		String contentType = extension.equals("xlsx")
+				? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+				: "application/pdf";
+
+		// file_info 먼저 저장 → id 확보 후 S3 키 구성
+		FileInfo fileInfo = FileInfo.builder()
+				.refTableName("report")
+				.refTableId(reportId)
+				.originName(originName)
+				.name(agcyType)     // agcy_excel 또는 agcy_pdf 고정
+				.extension(extension)
+				.fileSize(file.getSize())
+				.contentType(contentType)
+				.dir(dir)
+				.isVisible(YnType.y)
+				.createDatetime(now)
+				.createMemberId(userId)
+				.build();
+		FileInfo saved = fileInfoRepository.save(fileInfo);
+
+		// S3 objectKey: {rootDir}/report/{reportId}/{fileInfoId}.{extension}
+		String objectKey = rootDir + "/" + dir + saved.getId() + "." + extension;
+
+		PutObjectRequest putReq = PutObjectRequest.builder()
+				.bucket(bucket)
+				.key(objectKey)
+				.acl(ObjectCannedACL.PUBLIC_READ)
+				.contentType(contentType)
+				.build();
+
+		try (InputStream is = file.getInputStream()) {
+			ncloudS3Client.putObject(putReq, RequestBody.fromInputStream(is, file.getSize()));
+		} catch (Exception e) {
+			// 업로드 실패 시 file_info soft-delete (트랜잭션 롤백 대신 명시적 정리)
+			saved.setIsVisible(YnType.n);
+			fileInfoRepository.save(saved);
+			log.error("AGCY 파일 S3 업로드 실패 — reportId: {}, type: {}", reportId, agcyType, e);
+			throw new RuntimeException("파일 업로드 중 오류가 발생했습니다.", e);
+		}
+
+		log.info("AGCY 파일 업로드 완료 — reportId: {}, type: {}, fileInfoId: {}, key: {}",
+				reportId, agcyType, saved.getId(), objectKey);
+		return saved;
+	}
+
 	// 파일 삭제(스토리지에선 그대로)
 	@Transactional
 	public int deleteFile(Long fileId, CustomUserDetails user) {

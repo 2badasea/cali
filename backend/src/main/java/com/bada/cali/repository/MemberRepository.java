@@ -2,6 +2,7 @@ package com.bada.cali.repository;
 
 import com.bada.cali.dto.MemberDTO;
 import com.bada.cali.entity.Member;
+import com.bada.cali.common.enums.AuthType;
 import com.bada.cali.common.enums.YnType;
 import com.bada.cali.repository.projection.GetMemberInfoPr;
 import com.bada.cali.repository.projection.MemberListPr;
@@ -21,6 +22,9 @@ import java.util.Optional;
 // Sprig Data JPA에서 JpaRepository를 상속한 인터페이스는 별도 애너테이션 없이도 빈으로 등록됨(명시적으로 @Repository 애너테이션 명시해도 됨)
 public interface MemberRepository extends JpaRepository<Member, Long> {
 	
+	// auth 기준 멤버 전체 조회 (메뉴 권한 동기화용)
+	List<Member> findAllByAuth(AuthType auth);
+
 	// loginId(username)으로 유저 정보 조회
 	@Query("SELECT m FROM Member m WHERE m.loginId = :username AND m.isVisible = :isVisible ")
 	Optional<Member> findByLoginId(String username, YnType isVisible);
