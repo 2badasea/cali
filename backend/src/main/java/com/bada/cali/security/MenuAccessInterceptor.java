@@ -27,6 +27,11 @@ public class MenuAccessInterceptor implements HandlerInterceptor {
 
 	private final MenuQueryService menuQueryService;
 
+	// 업체계정(agentId > 0)에게 허용된 SSR URL 목록
+	private static final Set<String> AGENT_ALLOWED_URLS = Set.of(
+			"/cali/customerCaliHistory"
+	);
+
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
 
@@ -49,14 +54,24 @@ public class MenuAccessInterceptor implements HandlerInterceptor {
 			return true;
 		}
 
-		Set<Long> readableMenuIds = userDetails.getReadableMenuIds();
-
 		// 요청 URI 정규화 (contextPath 제거)
 		String uri = request.getRequestURI();
 		String contextPath = request.getContextPath();
 		if (contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)) {
 			uri = uri.substring(contextPath.length());
 		}
+
+		// 업체계정(agentId > 0)은 허용된 URL만 접근 가능 (화이트리스트 방식)
+		Long agentId = userDetails.getAgentId();
+		if (agentId != null && agentId > 0) {
+			if (!AGENT_ALLOWED_URLS.contains(uri)) {
+				log.warn("업체계정 접근 거부 — user={}, uri={}", userDetails.getUsername(), uri);
+				throw new MenuAccessDeniedException("접근 권한이 없습니다.");
+			}
+			return true;
+		}
+
+		Set<Long> readableMenuIds = userDetails.getReadableMenuIds();
 
 		// 캐시된 전체 visible 메뉴에서 요청 URI와 일치하는 메뉴 탐색
 		List<Menu> allVisibleMenus = menuQueryService.getAllVisibleMenus();

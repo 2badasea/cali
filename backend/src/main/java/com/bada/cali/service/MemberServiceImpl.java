@@ -537,10 +537,15 @@ public class MemberServiceImpl {
 	@Transactional(readOnly = true)
 	public TuiGridDTO.Res<TuiGridDTO.ResData<AgentAccountListRow>> getAgentAccountList(AgentAccountDTO.ListReq req) {
 		PageRequest pageRequest = PageRequest.of(req.getPage() - 1, req.getPerPage());
+
+		// 빈 문자열이면 전체 조회(null), 아니면 YnType으로 변환
+		String isActiveStr = req.getIsActive();
+		YnType isActiveFilter = (isActiveStr == null || isActiveStr.isBlank()) ? null : YnType.valueOf(isActiveStr);
+
 		Page<AgentAccountListRow> page = memberRepository.getAgentAccountList(
-				req.getIsActive(),
-				req.getSearchType(),
-				req.getKeyword(),
+				isActiveFilter,
+				req.getSearchType() == null ? "" : req.getSearchType(),
+				req.getKeyword() == null ? "" : req.getKeyword(),
 				pageRequest
 		);
 
@@ -611,6 +616,12 @@ public class MemberServiceImpl {
 				.createMemberId(user.getId())
 				.build();
 		Member saved = memberRepository.save(newMember);
+
+		// customer_cali_history 메뉴 읽기 권한 자동 부여
+		// 메뉴가 DB에 등록되어 있지 않으면 권한 부여를 스킵 (메뉴 미등록 환경 대비)
+		menuRepository.findByMenuCode("customer_cali_history").ifPresent(menu ->
+				memberPermissionReadRepository.save(MemberPermissionRead.of(saved, menu))
+		);
 
 		logRepository.save(Log.builder()
 				.workerName(user.getName())

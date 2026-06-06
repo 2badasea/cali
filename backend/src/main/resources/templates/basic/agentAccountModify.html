@@ -3,57 +3,59 @@
 
 <div layout:fragment="content">
     <form class="agentAccountModifyForm">
-        <div class="form-group row mb-2">
-            <label class="col-sm-3 col-form-label">업체명 <span class="text-danger">*</span></label>
-            <div class="col-sm-9">
-                <div class="input-group">
-                    <input type="text" class="form-control" name="agentName" placeholder="조회 버튼으로 선택" readonly />
-                    <input type="hidden" name="agentId" value="0" />
-                    <div class="input-group-append">
-                        <button type="button" class="btn btn-info searchAgentBtn">조회</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="form-group row mb-2">
-            <label class="col-sm-3 col-form-label">아이디 <span class="text-danger create-only">*</span></label>
-            <div class="col-sm-9">
-                <input type="text" class="form-control" name="loginId"
-                       placeholder="영문 소문자로 시작, 4~20자 (숫자 조합 가능)" maxlength="20" />
-                <small class="form-text text-muted">영문 소문자로 시작하며 4~20자로 구성되어야 합니다.</small>
-            </div>
-        </div>
-
-        <div class="form-group row mb-2">
-            <label class="col-sm-3 col-form-label">
-                비밀번호 <span class="text-danger create-only">*</span>
-            </label>
-            <div class="col-sm-9">
-                <input type="password" class="form-control" name="pwd"
-                       placeholder="소문자+대문자+숫자 각 1자 이상, 8~20자" maxlength="20" autocomplete="new-password" />
-            </div>
-        </div>
-
-        <div class="form-group row mb-2">
-            <label class="col-sm-3 col-form-label">
-                비밀번호 확인 <span class="text-danger create-only">*</span>
-            </label>
-            <div class="col-sm-9">
-                <input type="password" class="form-control" name="pwdConfirm"
-                       placeholder="비밀번호를 다시 입력하세요" maxlength="20" autocomplete="new-password" />
-            </div>
-        </div>
-
-        <div class="form-group row mb-2">
-            <label class="col-sm-3 col-form-label">로그인허용유무 <span class="text-danger">*</span></label>
-            <div class="col-sm-9">
-                <select class="form-control" name="isActive">
-                    <option value="n" selected>미허용</option>
-                    <option value="y">허용</option>
-                </select>
-            </div>
-        </div>
+        <table class="table table-bordered text-center mb-0">
+            <colgroup>
+                <col width="180px" />
+                <col />
+            </colgroup>
+            <tbody>
+                <tr>
+                    <th>업체명 <span class="text-danger">*</span></th>
+                    <td>
+                        <div class="input-group">
+                            <input type="text" class="form-control" name="agentName"
+                                   placeholder="조회 버튼으로 선택" readonly />
+                            <input type="hidden" name="agentId" value="0" />
+                            <div class="input-group-append">
+                                <button type="button" class="btn btn-info searchAgentBtn">조회</button>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <th>아이디 <span class="text-danger create-only">*</span></th>
+                    <td class="text-left">
+                        <input type="text" class="form-control" name="loginId"
+                               placeholder="영문 소문자로 시작, 4~20자 (숫자 조합 가능)" maxlength="20" />
+                    </td>
+                </tr>
+                <tr>
+                    <th>비밀번호 <span class="text-danger create-only">*</span></th>
+                    <td>
+                        <input type="password" class="form-control" name="pwd"
+                               placeholder="소문자+대문자+숫자 각 1자 이상, 8~20자" maxlength="20"
+                               autocomplete="new-password" />
+                    </td>
+                </tr>
+                <tr>
+                    <th>비밀번호 확인 <span class="text-danger create-only">*</span></th>
+                    <td>
+                        <input type="password" class="form-control" name="pwdConfirm"
+                               placeholder="비밀번호를 다시 입력하세요" maxlength="20"
+                               autocomplete="new-password" />
+                    </td>
+                </tr>
+                <tr>
+                    <th>로그인허용유무 <span class="text-danger">*</span></th>
+                    <td>
+                        <select class="form-control" name="isActive">
+                            <option value="n" selected>미허용</option>
+                            <option value="y">허용</option>
+                        </select>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
     </form>
 </div>
 

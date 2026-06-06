@@ -24,6 +24,9 @@ public interface MenuRepository extends JpaRepository<Menu, Long> {
 	// 관리용: is_visible 무관 전체 메뉴를 depth, sort_order 순으로 조회
 	List<Menu> findAllByOrderByDepthAscSortOrderAsc();
 
+	// menu_code로 메뉴 단건 조회 (업체계정 권한 부여 등에 사용)
+	Optional<Menu> findByMenuCode(String menuCode);
+
 	// menu_code 존재 여부 확인 (신규 등록 중복 체크)
 	boolean existsByMenuCode(String menuCode);
 

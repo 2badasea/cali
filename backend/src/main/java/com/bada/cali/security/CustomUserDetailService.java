@@ -73,6 +73,7 @@ public class CustomUserDetailService implements UserDetailsService {
 				, loginMember.getPwd()
 				, loginMember.getName()
 				, loginMember.getHp()
+				, loginMember.getAgentId()
 				, authorities
 				, readableMenuIdSet
 				, loginMember.getLastPwdUpdated()

@@ -256,7 +256,7 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 			FROM Member m
 			WHERE m.agentId > 0
 			  AND m.isVisible = 'y'
-			  AND (:isActive = '' OR m.isActive = :isActive)
+			  AND (:isActive IS NULL OR m.isActive = :isActive)
 			  AND (
 			        :keyword = ''
 			        OR (:searchType = 'loginId' AND m.loginId LIKE concat('%', :keyword, '%'))
@@ -265,7 +265,7 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 			ORDER BY m.name ASC, m.id ASC
 			""")
 	Page<AgentAccountListRow> getAgentAccountList(
-			@Param("isActive")    String isActive,
+			@Param("isActive")    YnType isActive,  // null이면 전체 조회
 			@Param("searchType")  String searchType,
 			@Param("keyword")     String keyword,
 			PageRequest pageRequest
