@@ -20,6 +20,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -343,6 +344,23 @@ public class ReportController {
 	) {
 		ResMessage<Object> res = reportService.agcyReportMultiUpdate(req, user);
 		return ResponseEntity.ok(res);
+	}
+
+	@Operation(summary = "대행성적서 상태 변경 (취소/초기화)",
+			description = "대행성적서의 진행상태를 CANCEL(취소) 또는 NORMAL(대기)로 변경함. SUCCESS(완료) 설정은 불가.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "변경 성공"),
+			@ApiResponse(responseCode = "400", description = "유효하지 않은 상태값 또는 대행성적서가 아닌 경우"),
+			@ApiResponse(responseCode = "404", description = "성적서 없음"),
+			@ApiResponse(responseCode = "500", description = "서버 오류"),
+	})
+	@PreAuthorize("hasRole('ADMIN')")
+	@PatchMapping("/agcyUpdateStatus")
+	public ResponseEntity<ResMessage<Object>> agcyUpdateStatus(
+			@RequestBody ReportDTO.UpdateAgcyStatusReq req,
+			@AuthenticationPrincipal CustomUserDetails user
+	) {
+		return ResponseEntity.ok(reportService.updateAgcyStatus(req, user));
 	}
 
 	// 대행성적서 파일 업로드 (xlsx 또는 pdf, 각 타입별 1개 제한)

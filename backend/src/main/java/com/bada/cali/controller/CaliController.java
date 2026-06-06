@@ -133,6 +133,13 @@ public class CaliController {
 		return "cali/reportPrint";
 	}
 
+	// 대행교정 페이지 이동
+	@GetMapping(value = "/agcyReport")
+	public String agcyReport(Model model) {
+		model.addAttribute("title", "대행교정");
+		return "cali/agcyReport";
+	}
+
 	// 업체별교정이력조회 페이지 이동
 	@GetMapping(value = "/customerCaliHistory")
 	public String customerCaliHistory(Model model) {

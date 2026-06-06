@@ -1,0 +1,16 @@
+/* 업체계정관리 페이지 */
+
+/* 검색 필터 select의 미허용 옵션 색상 */
+.isActiveFilter option[value="n"] {
+    color: #dc3545;
+}
+
+/* 상단 버튼/필터 영역 간격 */
+.searchForm .gap-1 {
+    gap: 0.25rem;
+}
+
+/* 행수 select 너비 고정 */
+.perPageSelect {
+    width: 70px;
+}

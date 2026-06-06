@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Log4j2
@@ -327,20 +328,22 @@ public class FileServiceImpl {
 
 		String extension = getFileExtension(originName).toLowerCase();
 
-		// 확장자 검증: xlsx, pdf만 허용
-		if (!extension.equals("xlsx") && !extension.equals("pdf")) {
-			throw new IllegalArgumentException("xlsx 또는 pdf 파일만 업로드 가능합니다.");
+		// 확장자 검증: Excel(xlsx/xls/xlsm/xlsb) 또는 pdf만 허용
+		boolean isExcel = Set.of("xlsx", "xls", "xlsm", "xlsb").contains(extension);
+		boolean isPdf = extension.equals("pdf");
+		if (!isExcel && !isPdf) {
+			throw new IllegalArgumentException("xlsx, xls, xlsm, xlsb 또는 pdf 파일만 업로드 가능합니다.");
 		}
 
-		// 파일 역할 구분: xlsx → agcy_excel, pdf → agcy_pdf
-		String agcyType = extension.equals("xlsx") ? "agcy_excel" : "agcy_pdf";
+		// 파일 역할 구분: Excel → agcy_excel, pdf → agcy_pdf
+		String agcyType = isExcel ? "agcy_excel" : "agcy_pdf";
 
 		// 동일 타입 파일 존재 시 거부 (사용자가 먼저 삭제해야 함)
 		boolean alreadyExists = fileInfoRepository.existsByRefTableNameAndRefTableIdAndNameAndIsVisible(
 				"report", reportId, agcyType, YnType.y);
 		if (alreadyExists) {
 			throw new IllegalArgumentException(
-					(extension.equals("xlsx") ? "Excel" : "PDF") + " 파일이 이미 존재합니다. 기존 파일을 삭제한 후 업로드해 주세요.");
+					(isExcel ? "Excel" : "PDF") + " 파일이 이미 존재합니다. 기존 파일을 삭제한 후 업로드해 주세요.");
 		}
 
 		String dir = "report/" + reportId + "/";
@@ -348,10 +351,19 @@ public class FileServiceImpl {
 		String rootDir = storageProps.getRootDir();
 		LocalDateTime now = LocalDateTime.now();
 
-		// 콘텐츠타입 결정
-		String contentType = extension.equals("xlsx")
-				? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-				: "application/pdf";
+		// 콘텐츠타입 결정 (Excel 세부 확장자별 MIME 타입)
+		String contentType;
+		if (isPdf) {
+			contentType = "application/pdf";
+		} else {
+			contentType = switch (extension) {
+				case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+				case "xls"  -> "application/vnd.ms-excel";
+				case "xlsm" -> "application/vnd.ms-excel.sheet.macroEnabled.12";
+				case "xlsb" -> "application/vnd.ms-excel.sheet.binary.macroEnabled.12";
+				default     -> "application/octet-stream";
+			};
+		}
 
 		// file_info 먼저 저장 → id 확보 후 S3 키 구성
 		FileInfo fileInfo = FileInfo.builder()

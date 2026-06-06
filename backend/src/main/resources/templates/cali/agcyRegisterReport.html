@@ -2,24 +2,21 @@
     xmlns:th="http://www.thymeleaf.org">
 
 <div layout:fragment="content">
-    <!-- 공통 입력: 접수구분 + 대행의뢰처 (모든 기기에 공통 적용) -->
+    <!-- 공통 입력: 대행의뢰처 (접수구분은 기기 그리드에서 행별로 선택) -->
     <div class="agcy-common-area mb-2">
         <div class="d-flex flex-wrap align-items-center">
-            <div class="input-group mr-2" style="width: auto;">
-                <div class="input-group-prepend">
-                    <span class="input-group-text">접수구분</span>
-                </div>
-                <select class="form-control orderType" name="orderType">
-                    <option value="ACCREDDIT">공인</option>
-                    <option value="UNACCREDDIT">비공인</option>
-                    <option value="TESTING">시험</option>
-                </select>
-            </div>
-            <div class="input-group" style="min-width: 280px;">
+            <div class="input-group" style="min-width: 360px; max-width: 600px;">
                 <div class="input-group-prepend">
                     <span class="input-group-text">대행의뢰처 <span class="text-danger">*</span></span>
                 </div>
-                <input type="text" class="form-control agcyAgent" placeholder="외부 교정기관명">
+                <input type="hidden" class="agcyAgentId" value="0">
+                <input type="text" class="form-control agcyAgent agcyAgentInput" placeholder="업체명 입력 후 엔터 또는 조회 클릭">
+                <div class="input-group-append">
+                    <button type="button" class="btn btn-secondary searchAgcyAgent">조회</button>
+                </div>
+                <div class="input-group-append">
+                    <button type="button" class="btn btn-danger agcyAgentReset">초기화</button>
+                </div>
             </div>
         </div>
     </div>
@@ -30,7 +27,7 @@
             <button type="button" class="btn btn-sm btn-danger deleteRows">행 삭제</button>
             <button type="button" class="btn btn-sm btn-primary insertRows">행 추가</button>
         </div>
-        <small class="text-muted">* 기기명 필수 / 중분류 선택 시 소분류 활성화</small>
+        <small class="text-muted">* 기기명 필수 / 접수구분 선택 · 중분류 선택 시 소분류 활성화</small>
     </div>
     <div class="agcyItemList"></div>
 </div>

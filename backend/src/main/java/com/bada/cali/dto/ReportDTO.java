@@ -399,7 +399,8 @@ public class ReportDTO {
 			String itemNum,          // 기기번호
 			Integer itemCaliCycle,   // 교정주기
 			Long caliFee,            // 교정수수료
-			String remark            // 비고
+			String remark,           // 비고
+			OrderType orderType      // 행별 접수구분 (null이면 상위 AddAgcyReportReq.orderType 또는 ACCREDDIT 기본값 적용)
 	) {}
 
 	/**
@@ -409,8 +410,9 @@ public class ReportDTO {
 	 */
 	public record UpdateAgcyReportReq(
 			Long id,                 // 성적서 id
-			String reportNum,        // 외부 성적서번호 (null 가능)
+			String reportNum,        // 외부 성적서번호 (빈 문자열이면 null 처리, 상태 자동 결정)
 			String agcyAgent,        // 대행의뢰처
+			OrderType orderType,     // 접수구분 (수정 허용)
 			Long middleItemCodeId,
 			Long smallItemCodeId,
 			Long itemId,
@@ -465,9 +467,15 @@ public class ReportDTO {
 	) {}
 
 	/**
+	 * 대행성적서 상태 변경 요청 (취소 / 초기화)
+	 * - status: "CANCEL" 또는 "NORMAL" 만 허용
+	 */
+	public record UpdateAgcyStatusReq(Long id, String status) {}
+
+	/**
 	 * 대행성적서 통합수정 요청
 	 * - 각 필드가 null 이면 해당 항목을 변경하지 않음 (partial update)
-	 * - reportStatus 는 AGCY 전용 값(SUCCESS·CANCEL)만 허용
+	 * - 외부성적서번호·진행상태는 단건 수정(updateAgcyReport)에서만 처리
 	 */
 	@Getter
 	@Setter
@@ -485,11 +493,11 @@ public class ReportDTO {
 		@Schema(description = "교정일자 (null = 변경 안 함)")
 		private LocalDate caliDate;
 
-		@Schema(description = "진행상태 — SUCCESS(완료) 또는 CANCEL(취소) 만 허용. null = 변경 안 함")
-		private String reportStatus;
+		@Schema(description = "중분류 코드 id (null = 변경 안 함)")
+		private Long middleItemCodeId;
 
-		@Schema(description = "외부 성적서번호 (null = 변경 안 함)")
-		private String reportNum;
+		@Schema(description = "소분류 코드 id (null = 변경 안 함)")
+		private Long smallItemCodeId;
 	}
 
 }

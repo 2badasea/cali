@@ -48,7 +48,10 @@
       "Read(//c//**)",
       "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\.gradle\\\\jdks\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"C:\\\\Users\\\\gnjqt\\\\.jdks\" -ErrorAction SilentlyContinue | Select-Object Name)",
       "Bash(JAVA_HOME=\"C:\\\\Users\\\\gnjqt\\\\.jdks\\\\corretto-17.0.18\" \"C:\\\\BadaDev\\\\cali\\\\backend\\\\gradlew.bat\" -p \"C:\\\\BadaDev\\\\cali\\\\backend\" compileJava)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\BadaDev\\\\cali\\\\backend\\\\src\\\\main\\\\resources\\\\templates\\\\order\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -First 10)",
+      "Bash(Get-ChildItem -Path \"C:\\\\BadaDev\\\\cali\\\\backend\\\\src\\\\main\\\\resources\\\\static\\\\js\\\\order\" -ErrorAction SilentlyContinue)"
     ],
     "additionalDirectories": [
       "C:\\BadaDev\\my-obsidian\\개발공부\\architecture",

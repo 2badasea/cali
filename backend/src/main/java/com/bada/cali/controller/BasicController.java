@@ -126,4 +126,17 @@ public class BasicController {
 		model.addAttribute("title", "성적서시트");
 		return "basic/dataSheetSetting";
 	}
+
+	// 업체계정관리 페이지
+	@GetMapping(value = "/agentAccountManage")
+	public String agentAccountManage(Model model) {
+		model.addAttribute("title", "업체계정관리");
+		return "basic/agentAccountManage";
+	}
+
+	// 업체계정 등록/수정 모달 (param.id 없으면 등록, 있으면 수정)
+	@PostMapping(value = "/agentAccountModify")
+	public String agentAccountModify(Model model) {
+		return "basic/agentAccountModify";
+	}
 }

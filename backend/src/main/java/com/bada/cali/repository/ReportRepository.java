@@ -9,6 +9,7 @@ import com.bada.cali.repository.projection.LastManageNoByType;
 import com.bada.cali.repository.projection.LastReportNumByOrderType;
 import com.bada.cali.repository.projection.OrderDetailsList;
 import com.bada.cali.repository.projection.ReportCountRow;
+import com.bada.cali.repository.projection.AgcyReportListRow;
 import com.bada.cali.repository.projection.AgentCaliHistoryListRow;
 import com.bada.cali.repository.projection.ManagerApprovalListRow;
 import com.bada.cali.repository.projection.WorkApprovalListRow;
@@ -1103,4 +1104,137 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 			@Param("isInternal")      int isInternal,
 			@Param("allowedAgentIds") List<Long> allowedAgentIds
 	);
+
+	/**
+	 * 대행교정 목록 조회
+	 * - report.type = 'AGCY', is_visible != 'n'
+	 * - status: null → 전체, 값 있으면 report_status 필터
+	 * - startDate/endDate: null → 날짜 필터 없음
+	 * - keyword: '' → 키워드 필터 없음
+	 */
+	@Query(value = """
+			SELECT
+			    r.id                    AS id,
+			    r.order_type            AS orderType,
+			    o.order_num             AS orderNum,
+			    r.agcy_self_report_num  AS agcySelfReportNum,
+			    r.report_num            AS reportNum,
+			    o.cust_agent            AS custAgent,
+			    o.report_agent          AS reportAgent,
+			    r.agcy_agent            AS agcyAgent,
+			    r.item_name             AS itemName,
+			    r.item_make_agent       AS itemMakeAgent,
+			    r.item_format           AS itemFormat,
+			    r.item_num              AS itemNum,
+			    r.cali_fee              AS caliFee,
+			    r.cali_date             AS caliDate,
+			    r.remark                AS remark,
+			    r.report_status         AS reportStatus,
+			    (SELECT fi.id FROM file_info fi
+			     WHERE fi.ref_table_name = 'report'
+			       AND fi.ref_table_id   = r.id
+			       AND fi.name           = 'agcy_excel'
+			       AND fi.is_visible     = 'y'
+			     LIMIT 1) AS excelFileId,
+			    (SELECT fi.id FROM file_info fi
+			     WHERE fi.ref_table_name = 'report'
+			       AND fi.ref_table_id   = r.id
+			       AND fi.name           = 'agcy_pdf'
+			       AND fi.is_visible     = 'y'
+			     LIMIT 1) AS pdfFileId
+			FROM report r
+			LEFT JOIN cali_order o ON o.id = r.cali_order_id
+			WHERE r.report_type = 'AGCY'
+			  AND r.is_visible != 'n'
+			  AND (:status IS NULL OR r.report_status = :status)
+			  AND (:startDate IS NULL OR r.cali_date >= :startDate)
+			  AND (:endDate IS NULL OR r.cali_date <= :endDate)
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'all' AND (
+			              o.order_num              LIKE CONCAT('%', :keyword, '%')
+			              OR r.agcy_self_report_num LIKE CONCAT('%', :keyword, '%')
+			              OR r.report_num           LIKE CONCAT('%', :keyword, '%')
+			              OR o.cust_agent           LIKE CONCAT('%', :keyword, '%')
+			              OR o.report_agent         LIKE CONCAT('%', :keyword, '%')
+			              OR r.agcy_agent           LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_name            LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_make_agent      LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_format          LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_num             LIKE CONCAT('%', :keyword, '%')
+			          ))
+			          OR (:searchType = 'orderNum'          AND o.order_num              LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agcySelfReportNum' AND r.agcy_self_report_num   LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'reportNum'         AND r.report_num             LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'custAgent'         AND o.cust_agent             LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'reportAgent'       AND o.report_agent           LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agcyAgent'         AND r.agcy_agent             LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'          AND r.item_name              LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemMakeAgent'     AND r.item_make_agent        LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemFormat'        AND r.item_format            LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'           AND r.item_num               LIKE CONCAT('%', :keyword, '%'))
+			      )
+			  )
+			ORDER BY r.id DESC
+			""", nativeQuery = true)
+	List<AgcyReportListRow> searchAgcyReportList(
+			@Param("status")     String status,
+			@Param("startDate")  String startDate,
+			@Param("endDate")    String endDate,
+			@Param("searchType") String searchType,
+			@Param("keyword")    String keyword,
+			Pageable pageable
+	);
+
+	/**
+	 * 대행교정 목록 건수 (searchAgcyReportList 동일 WHERE 조건)
+	 */
+	@Query(value = """
+			SELECT COUNT(*)
+			FROM report r
+			LEFT JOIN cali_order o ON o.id = r.cali_order_id
+			WHERE r.report_type = 'AGCY'
+			  AND r.is_visible != 'n'
+			  AND (:status IS NULL OR r.report_status = :status)
+			  AND (:startDate IS NULL OR r.cali_date >= :startDate)
+			  AND (:endDate IS NULL OR r.cali_date <= :endDate)
+			  AND (
+			      :keyword = '' OR (
+			          (:searchType = 'all' AND (
+			              o.order_num              LIKE CONCAT('%', :keyword, '%')
+			              OR r.agcy_self_report_num LIKE CONCAT('%', :keyword, '%')
+			              OR r.report_num           LIKE CONCAT('%', :keyword, '%')
+			              OR o.cust_agent           LIKE CONCAT('%', :keyword, '%')
+			              OR o.report_agent         LIKE CONCAT('%', :keyword, '%')
+			              OR r.agcy_agent           LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_name            LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_make_agent      LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_format          LIKE CONCAT('%', :keyword, '%')
+			              OR r.item_num             LIKE CONCAT('%', :keyword, '%')
+			          ))
+			          OR (:searchType = 'orderNum'          AND o.order_num              LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agcySelfReportNum' AND r.agcy_self_report_num   LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'reportNum'         AND r.report_num             LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'custAgent'         AND o.cust_agent             LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'reportAgent'       AND o.report_agent           LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'agcyAgent'         AND r.agcy_agent             LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemName'          AND r.item_name              LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemMakeAgent'     AND r.item_make_agent        LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemFormat'        AND r.item_format            LIKE CONCAT('%', :keyword, '%'))
+			          OR (:searchType = 'itemNum'           AND r.item_num               LIKE CONCAT('%', :keyword, '%'))
+			      )
+			  )
+			""", nativeQuery = true)
+	long countAgcyReportList(
+			@Param("status")     String status,
+			@Param("startDate")  String startDate,
+			@Param("endDate")    String endDate,
+			@Param("searchType") String searchType,
+			@Param("keyword")    String keyword
+	);
+
+	/** 외부성적서번호 중복 여부 확인 (자기 자신 제외, 삭제된 성적서 제외) */
+	@Query(value = "SELECT COUNT(*) FROM report WHERE report_num = :reportNum AND is_visible != 'n' AND id != :id",
+			nativeQuery = true)
+	long countDuplicateReportNum(@Param("reportNum") String reportNum, @Param("id") Long id);
 }

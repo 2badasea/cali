@@ -160,6 +160,7 @@ $(function () {
 						managerTel: row.mainManagerTel ?? '',
 						managerEmail: row.mainManagerEmail,
 						agentFlag: $modal.param.agentFlag ?? 1, // 조회한 업체형태
+						agentNum: row.agentNum ?? '',           // 사업자번호 (업체계정 등록 시 필수 여부 확인용)
 					};
 
 					$modal.returnData = returnData;

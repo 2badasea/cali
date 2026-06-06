@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/layout}"
+    xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <link rel="stylesheet" th:href="@{/css/cali/agcyReport.css}" />
+</head>
+
+<body>
+    <div layout:fragment="content">
+        <div class="wrapper">
+            <form class="searchForm mb-1" name="searchForm">
+                <div class="d-flex flex-wrap align-items-center mb-1" style="gap: 4px;">
+
+                    <!-- 좌측: 기능 버튼 + 행 수 -->
+                    <div class="d-flex align-items-center flex-wrap" style="gap: 4px;">
+
+                        <!-- 통합수정 버튼 -->
+                        <button type="button" class="btn btn-secondary btn-sm btnMultiUpdate">통합수정</button>
+
+                        <!-- 일괄다운로드 드롭다운 -->
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                일괄다운로드
+                            </button>
+                            <div class="dropdown-menu">
+                                <a class="dropdown-item btnDownloadExcel" href="#">EXCEL</a>
+                                <a class="dropdown-item btnDownloadPdf" href="#">PDF</a>
+                            </div>
+                        </div>
+
+                        <!-- 행 수 -->
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text">행 수</span>
+                            </div>
+                            <select class="form-control form-control-sm rowLeng">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 우측: 검색 필터 -->
+                    <div class="ml-auto d-flex align-items-center" style="gap: 4px; flex-wrap: nowrap;">
+
+                        <!-- 진행상태 -->
+                        <div class="input-group input-group-sm" style="width: 100px;">
+                            <select class="form-control form-control-sm" name="status" style="width: 100px;">
+                                <option value="" selected>진행상태</option>
+                                <option value="NORMAL">대기</option>
+                                <option value="SUCCESS">완료</option>
+                                <option value="CANCEL">취소</option>
+                            </select>
+                        </div>
+
+                        <!-- 교정일자 기간 -->
+                        <div class="input-group input-group-sm" style="width: fit-content; flex-wrap: nowrap !important;">
+                            <input type="date" class="form-control" name="startDate" style="width: 125px;" />
+                            <span class="input-group-text" style="border: none; padding: 0 4px; background: transparent;">~</span>
+                            <input type="date" class="form-control" name="endDate" style="width: 125px;" />
+                        </div>
+
+                        <!-- 검색타입 + 키워드 -->
+                        <div class="input-group input-group-sm">
+                            <select class="form-control form-control-sm" name="searchType" style="width: 130px; margin-right: 5px;">
+                                <option value="all">전체</option>
+                                <option value="orderNum">접수번호</option>
+                                <option value="agcySelfReportNum">자체성적서번호</option>
+                                <option value="reportNum">외부성적서번호</option>
+                                <option value="custAgent">신청업체</option>
+                                <option value="reportAgent">성적서발행처</option>
+                                <option value="agcyAgent">대행의뢰처</option>
+                                <option value="itemName">기기명</option>
+                                <option value="itemMakeAgent">제작회사</option>
+                                <option value="itemFormat">형식</option>
+                                <option value="itemNum">기기번호</option>
+                            </select>
+                            <input type="text" class="form-control form-control-sm" name="keyword" style="width: 100px;" />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </div>
+
+                </div>
+            </form>
+
+            <div class="grid agcyReportList"></div>
+        </div>
+    </div>
+</body>
+
+</html>

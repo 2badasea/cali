@@ -1,0 +1,9 @@
+/* 완료 행 (SELF approvalStatus=SUCCESS / AGCY reportStatus=SUCCESS) */
+.tui-grid-cell.row-complete {
+    background-color: #d4edda !important;
+}
+
+/* 취소 행 (reportStatus=CANCEL) */
+.tui-grid-cell.row-cancel {
+    background-color: #f8d7da !important;
+}

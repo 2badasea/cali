@@ -309,8 +309,8 @@ $(function () {
 			perPage: 100,
 		},
 		rowHeaders: ['checkbox'],
-		minBodyHeight: 600,
-		bodyHeight: 600,
+		minBodyHeight: 663,
+		bodyHeight: 663,
 		rowHeight: 'auto',
 		data: $modal.dataSource,
 	});

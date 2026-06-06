@@ -3,6 +3,7 @@ package com.bada.cali.service;
 import com.bada.cali.common.ResMessage;
 import com.bada.cali.common.enums.AuthType;
 import com.bada.cali.common.enums.YnType;
+import com.bada.cali.dto.AgentAccountDTO;
 import com.bada.cali.dto.MemberDTO;
 import com.bada.cali.dto.TuiGridDTO;
 import com.bada.cali.entity.*;
@@ -11,6 +12,7 @@ import com.bada.cali.mapper.AgentMapper;
 import com.bada.cali.mapper.MemberCodeAuthMapper;
 import com.bada.cali.mapper.MemberMapper;
 import com.bada.cali.repository.*;
+import com.bada.cali.repository.projection.AgentAccountListRow;
 import com.bada.cali.repository.projection.GetMemberInfoPr;
 import com.bada.cali.repository.projection.MemberCodeAuthPr;
 import com.bada.cali.repository.projection.MemberListPr;
@@ -523,6 +525,172 @@ public class MemberServiceImpl {
 				m.getParent() != null ? m.getParent().getId() : null,
 				permittedMenuIds.contains(m.getId())
 		);
+	}
+
+	// ──────────────────────────────────────────────────────────────
+	// 업체계정관리 CRUD
+	// ──────────────────────────────────────────────────────────────
+
+	/**
+	 * 업체계정 목록 조회 (TUI Grid 서버사이드 페이지네이션)
+	 */
+	@Transactional(readOnly = true)
+	public TuiGridDTO.Res<TuiGridDTO.ResData<AgentAccountListRow>> getAgentAccountList(AgentAccountDTO.ListReq req) {
+		PageRequest pageRequest = PageRequest.of(req.getPage() - 1, req.getPerPage());
+		Page<AgentAccountListRow> page = memberRepository.getAgentAccountList(
+				req.getIsActive(),
+				req.getSearchType(),
+				req.getKeyword(),
+				pageRequest
+		);
+
+		TuiGridDTO.ResData<AgentAccountListRow> data = TuiGridDTO.ResData.<AgentAccountListRow>builder()
+				.contents(page.getContent())
+				.pagination(TuiGridDTO.Pagination.builder()
+						.page(req.getPage())
+						.totalCount((int) page.getTotalElements())
+						.build())
+				.build();
+		return new TuiGridDTO.Res<>(true, data);
+	}
+
+	/**
+	 * 업체계정 단건 조회.
+	 * 수정 모달 초기화 시 DB에서 최신 값을 가져오기 위해 사용.
+	 */
+	@Transactional(readOnly = true)
+	public AgentAccountDTO.DetailRes getAgentAccountDetail(Long memberId) {
+		Member member = memberRepository.findByIdAndIsVisible(memberId, YnType.y);
+		if (member == null) {
+			throw new EntityNotFoundException("해당 계정을 찾을 수 없습니다.");
+		}
+		// agent.name 조회
+		String agentName = agentRepository.findByIsVisibleAndId(YnType.y, member.getAgentId())
+				.map(a -> a.getName())
+				.orElse("");
+
+		return new AgentAccountDTO.DetailRes(
+				member.getId(),
+				member.getAgentId(),
+				agentName,
+				member.getLoginId(),
+				member.getIsActive().name()
+		);
+	}
+
+	/**
+	 * 업체계정 등록.
+	 * - login_id 중복 검사 (is_visible='y' 기준)
+	 * - agent_id 유효성 검사 (agent가 존재하고 is_visible='y'인지)
+	 * - 비밀번호 BCrypt 암호화
+	 */
+	@Transactional
+	public void createAgentAccount(AgentAccountDTO.CreateReq req, CustomUserDetails user) {
+		// login_id 중복 확인
+		if (memberRepository.existsByLoginIdAndIsVisible(req.getLoginId(), YnType.y)) {
+			throw new IllegalArgumentException("이미 사용 중인 아이디입니다. 다른 아이디를 입력해주세요.");
+		}
+
+		// agent 유효성 확인
+		agentRepository.findByIsVisibleAndId(YnType.y, req.getAgentId())
+				.orElseThrow(() -> new IllegalArgumentException("선택한 업체 정보를 찾을 수 없습니다."));
+
+		String encodedPwd = passwordEncoder.encode(req.getPwd());
+		LocalDateTime now = LocalDateTime.now();
+
+		Member newMember = Member.builder()
+				.loginId(req.getLoginId())
+				.pwd(encodedPwd)
+				.agentId(req.getAgentId())
+				.name(req.getName())
+				.nameEng("")
+				.isActive(YnType.valueOf(req.getIsActive()))
+				.isVisible(YnType.y)
+				.auth(AuthType.user)
+				.createDatetime(now)
+				.createMemberId(user.getId())
+				.build();
+		Member saved = memberRepository.save(newMember);
+
+		logRepository.save(Log.builder()
+				.workerName(user.getName())
+				.logType("i")
+				.refTable("member")
+				.refTableId(saved.getId())
+				.logContent("업체계정 등록 - 고유번호 - [" + saved.getId() + "], loginId: " + saved.getLoginId())
+				.createDatetime(now)
+				.createMemberId(user.getId())
+				.build());
+	}
+
+	/**
+	 * 업체계정 수정.
+	 * - 업체명(name), 로그인허용유무(isActive), agentId 변경
+	 * - 비밀번호는 입력한 경우에만 변경
+	 */
+	@Transactional
+	public void updateAgentAccount(Long memberId, AgentAccountDTO.UpdateReq req, CustomUserDetails user) {
+		Member member = memberRepository.findByIdAndIsVisible(memberId, YnType.y);
+		if (member == null) {
+			throw new jakarta.persistence.EntityNotFoundException("해당 계정을 찾을 수 없습니다.");
+		}
+
+		// agent 유효성 확인 (업체 변경 시)
+		agentRepository.findByIsVisibleAndId(YnType.y, req.getAgentId())
+				.orElseThrow(() -> new IllegalArgumentException("선택한 업체 정보를 찾을 수 없습니다."));
+
+		member.setAgentId(req.getAgentId());
+		member.setName(req.getName());
+		member.setIsActive(YnType.valueOf(req.getIsActive()));
+
+		// 비밀번호는 입력이 있을 때만 변경
+		if (req.getPwd() != null && !req.getPwd().isBlank()) {
+			member.updatePwd(passwordEncoder.encode(req.getPwd()));
+		}
+
+		logRepository.save(Log.builder()
+				.workerName(user.getName())
+				.logType("u")
+				.refTable("member")
+				.refTableId(memberId)
+				.logContent("업체계정 수정 - 고유번호 - [" + memberId + "]")
+				.createDatetime(LocalDateTime.now())
+				.createMemberId(user.getId())
+				.build());
+	}
+
+	/**
+	 * 업체계정 소프트삭제.
+	 * - 삭제 조건: 해당 member의 agentId가 가리키는 agent가 is_visible='n'이어야 함
+	 * - 하나라도 조건 미충족 시 전체 삭제 불가
+	 */
+	@Transactional
+	public void deleteAgentAccounts(AgentAccountDTO.DeleteReq req, CustomUserDetails user) {
+		List<Long> memberIds = req.getIds();
+
+		// 대상 member들의 agentId 수집
+		List<Long> agentIds = memberRepository.findAgentIdsByMemberIds(memberIds);
+
+		// 삭제 조건: 해당 agent가 모두 is_visible='n'이어야 함
+		List<Long> deletedAgentIds = agentRepository.findDeletedAgentIds(agentIds);
+		if (deletedAgentIds.size() != agentIds.size()) {
+			throw new IllegalArgumentException(
+					"삭제할 수 없는 계정이 포함되어 있습니다. 업체관리에서 해당 업체를 먼저 삭제한 후 다시 시도해주세요."
+			);
+		}
+
+		LocalDateTime now = LocalDateTime.now();
+		int deleted = memberRepository.softDeleteByIds(memberIds, YnType.n, now, user.getId());
+
+		logRepository.save(Log.builder()
+				.workerName(user.getName())
+				.logType("d")
+				.refTable("member")
+				.refTableId(0L)
+				.logContent("업체계정 삭제 - 고유번호 - " + memberIds)
+				.createDatetime(now)
+				.createMemberId(user.getId())
+				.build());
 	}
 
 }

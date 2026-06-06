@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/layout}"
+    xmlns:th="http://www.thymeleaf.org">
+
+<body>
+    <div layout:fragment="content">
+        <div class="wrapper">
+            <!-- 상단 버튼 + 검색 필터 -->
+            <form class="searchForm mb-1" name="searchForm">
+                <div class="d-flex align-items-center flex-wrap gap-1">
+                    <!-- 좌측: 버튼 영역 -->
+                    <ul class="list-group list-group-horizontal mr-auto mb-0">
+                        <li class="mr-1">
+                            <button type="button" class="btn btn-danger deleteAccountBtn">삭제</button>
+                        </li>
+                        <li class="mr-1">
+                            <button type="button" class="btn btn-primary addAccountBtn">등록</button>
+                        </li>
+                        <li>
+                            <select class="form-control perPageSelect" name="perPage">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </li>
+                    </ul>
+
+                    <!-- 우측: 검색 필터 -->
+                    <ul class="list-group list-group-horizontal ml-auto mb-0" id="searchFormUl">
+                        <!-- 로그인허용유무 필터 -->
+                        <li class="mr-1 d-flex">
+                            <select class="form-control isActiveFilter" name="isActive">
+                                <option value="">로그인허용유무</option>
+                                <option value="y">허용</option>
+                                <option value="n" class="text-danger">미허용</option>
+                            </select>
+                        </li>
+                        <!-- 검색타입 + 검색어 -->
+                        <li class="mr-1 d-flex">
+                            <div class="input-group">
+                                <select class="form-control searchType" name="searchType">
+                                    <option value="loginId" selected>로그인아이디</option>
+                                    <option value="name">업체명</option>
+                                </select>
+                                <div class="input-group-append">
+                                    <input type="text" class="form-control" name="keyword" placeholder="검색어" />
+                                </div>
+                            </div>
+                        </li>
+                        <li>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-search"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+            </form>
+
+            <!-- 그리드 -->
+            <div class="grid agentAccountList"></div>
+        </div>
+    </div>
+</body>
+
+</html>

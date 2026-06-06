@@ -2,6 +2,7 @@ package com.bada.cali.service;
 
 import com.bada.cali.common.ResMessage;
 import com.bada.cali.common.enums.*;
+import com.bada.cali.dto.AgcyReportDTO;
 import com.bada.cali.dto.AgentCaliHistoryDTO;
 import com.bada.cali.dto.EquipmentDTO;
 import com.bada.cali.dto.ItemDTO;
@@ -18,6 +19,7 @@ import com.bada.cali.repository.FileInfoRepository;
 import com.bada.cali.repository.LogRepository;
 import com.bada.cali.repository.MemberRepository;
 import com.bada.cali.repository.ReportRepository;
+import com.bada.cali.repository.projection.AgcyReportListRow;
 import com.bada.cali.repository.projection.AgentCaliHistoryListRow;
 import com.bada.cali.repository.projection.OrderDetailsList;
 import com.bada.cali.repository.projection.ReportPrintListRow;
@@ -353,11 +355,11 @@ public class ReportServiceImpl {
 				
 				// 자체/대행 분리 검증
 				if (reportType == ReportType.AGCY) {
-					// 대행의 경우, 기술책임자 결재 완료 여부만 확인한다.
+					// 대행: 진행상태가 완료(SUCCESS)이면 삭제 불가 / 대기(NORMAL)·취소(CANCEL)이면 허용
 					for (Report report : reportList) {
-						if (report.getApprovalStatus() == AppStatus.SUCCESS) {
+						if (report.getReportStatus() == ReportStatus.SUCCESS) {
 							code = -1;
-							message = String.format("결재가 완료된 대행성적서는 삭제가 불가능합니다. (성적서번호: %s)", report.getReportNum());
+							message = String.format("완료 처리된 대행성적서는 삭제가 불가능합니다. (번호: %s)", report.getAgcySelfReportNum());
 							return new ResMessage<>(code, message, null);
 						}
 					}
@@ -439,7 +441,7 @@ public class ReportServiceImpl {
 					String originReportNum = report.getReportNum();
 					String originManageNo = report.getManageNo();
 					String suffix = String.format("[deleted-%s", uuid);
-					String newReportNum = originReportNum + suffix;
+					String newReportNum = (originReportNum != null ? originReportNum : "") + suffix;
 					String newManageNo = originManageNo + suffix;
 					
 					// dirty checking 방식으로 영속성컨텍스트로 들어온 성적서들에 대해 모두 set을 통해 update
@@ -1219,10 +1221,14 @@ public class ReportServiceImpl {
 				itemCaliCycle = 12;
 			}
 
+			// 행별 접수구분 우선, 없으면 요청 상위값, 그래도 없으면 공인 기본값
+			OrderType itemOrderType = item.orderType() != null ? item.orderType()
+					: (request.getOrderType() != null ? request.getOrderType() : OrderType.ACCREDDIT);
+
 			Report report = Report.builder()
 					.caliOrderId(caliOrderId)
 					.reportType(ReportType.AGCY)
-					.orderType(request.getOrderType())
+					.orderType(itemOrderType)
 					.agcyAgent(request.getAgcyAgent())
 					.agcySelfReportNum(agcySelfReportNum)
 					.manageNo(manageNo)
@@ -1292,6 +1298,9 @@ public class ReportServiceImpl {
 		Long userId = user.getId();
 
 		report.setAgcyAgent(req.agcyAgent());
+		if (req.orderType() != null) {
+			report.setOrderType(req.orderType());
+		}
 		report.setMiddleItemCodeId(req.middleItemCodeId());
 		report.setSmallItemCodeId(req.smallItemCodeId());
 		if (req.itemId() != null && req.itemId() > 0) {
@@ -1310,9 +1319,15 @@ public class ReportServiceImpl {
 		if (req.caliDate() != null) {
 			report.setCaliDate(req.caliDate());
 		}
-		if (req.reportNum() != null) {
-			report.setReportNum(req.reportNum());
+		// 외부성적서번호: trim 후 빈 문자열이면 null, 아니면 그대로 저장
+		// 유무에 따라 진행상태 자동 결정 (있으면 SUCCESS, 없으면 NORMAL)
+		String trimmedReportNum = req.reportNum() != null ? req.reportNum().trim() : "";
+		// 중복 체크: is_visible='y' 기준, 자기 자신(id) 제외하고 동일 외부성적서번호가 존재하면 차단
+		if (!trimmedReportNum.isBlank() && reportRepository.countDuplicateReportNum(trimmedReportNum, id) > 0) {
+			throw new IllegalArgumentException("이미 사용 중인 외부성적서번호입니다: " + trimmedReportNum);
 		}
+		report.setReportNum(trimmedReportNum.isBlank() ? null : trimmedReportNum);
+		report.setReportStatus(trimmedReportNum.isBlank() ? ReportStatus.NORMAL : ReportStatus.SUCCESS);
 		report.setUpdateMemberId(userId);
 
 		Log updateLog = Log.builder()
@@ -1330,9 +1345,53 @@ public class ReportServiceImpl {
 	}
 
 	/**
+	 * 대행성적서 상태 변경 (취소 / 초기화)
+	 * - CANCEL: 취소 처리
+	 * - NORMAL: 대기 상태로 초기화 (취소 해제)
+	 */
+	@Transactional
+	public ResMessage<Object> updateAgcyStatus(ReportDTO.UpdateAgcyStatusReq req, CustomUserDetails user) {
+		Report report = reportRepository.findById(req.id())
+				.orElseThrow(() -> new EntityNotFoundException("대행성적서를 찾을 수 없습니다. id=" + req.id()));
+
+		if (report.getReportType() != ReportType.AGCY) {
+			throw new IllegalArgumentException("대행성적서만 상태 변경이 가능합니다.");
+		}
+
+		ReportStatus targetStatus;
+		try {
+			targetStatus = ReportStatus.valueOf(req.status());
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("유효하지 않은 상태값입니다: " + req.status());
+		}
+
+		if (targetStatus != ReportStatus.NORMAL && targetStatus != ReportStatus.CANCEL) {
+			throw new IllegalArgumentException("취소(CANCEL) 또는 초기화(NORMAL)만 처리할 수 있습니다.");
+		}
+
+		report.setReportStatus(targetStatus);
+		report.setUpdateMemberId(user.getId());
+
+		String statusLabel = targetStatus == ReportStatus.CANCEL ? "취소" : "대기";
+		Log statusLog = Log.builder()
+				.logType("u")
+				.createMemberId(user.getId())
+				.createDatetime(LocalDateTime.now())
+				.workerName(user.getName())
+				.refTableId(req.id())
+				.refTable("report")
+				.logContent(String.format("[대행성적서 상태변경] %s → %s (고유번호: %d)",
+						report.getAgcySelfReportNum(), statusLabel, req.id()))
+				.build();
+		logRepository.save(statusLog);
+
+		return new ResMessage<>(1, String.format("대행성적서가 '%s' 상태로 변경되었습니다.", statusLabel), null);
+	}
+
+	/**
 	 * 대행성적서 통합수정 (N건 partial update)
 	 * - 각 필드가 null이면 변경하지 않음
-	 * - reportStatus는 SUCCESS(완료) 또는 CANCEL(취소)만 허용
+	 * - 외부성적서번호·진행상태는 단건 수정(updateAgcyReport)에서만 처리
 	 */
 	@Transactional
 	public ResMessage<Object> agcyReportMultiUpdate(ReportDTO.AgcyReportMultiUpdateReq req, CustomUserDetails user) {
@@ -1349,18 +1408,6 @@ public class ReportServiceImpl {
 			}
 		}
 
-		// reportStatus 유효성 검증 (SUCCESS 또는 CANCEL만 허용)
-		if (req.getReportStatus() != null && !req.getReportStatus().isBlank()) {
-			try {
-				ReportStatus targetStatus = ReportStatus.valueOf(req.getReportStatus());
-				if (targetStatus != ReportStatus.SUCCESS && targetStatus != ReportStatus.CANCEL) {
-					return new ResMessage<>(-1, "대행성적서 상태는 SUCCESS(완료) 또는 CANCEL(취소)만 허용됩니다.", null);
-				}
-			} catch (IllegalArgumentException e) {
-				return new ResMessage<>(-1, "유효하지 않은 상태값입니다: " + req.getReportStatus(), null);
-			}
-		}
-
 		LocalDateTime now = LocalDateTime.now();
 		Long userId = user.getId();
 		List<Long> updatedIds = new ArrayList<>();
@@ -1372,11 +1419,11 @@ public class ReportServiceImpl {
 			if (req.getCaliDate() != null) {
 				report.setCaliDate(req.getCaliDate());
 			}
-			if (req.getReportStatus() != null && !req.getReportStatus().isBlank()) {
-				report.setReportStatus(ReportStatus.valueOf(req.getReportStatus()));
+			if (req.getMiddleItemCodeId() != null) {
+				report.setMiddleItemCodeId(req.getMiddleItemCodeId());
 			}
-			if (req.getReportNum() != null && !req.getReportNum().isBlank()) {
-				report.setReportNum(req.getReportNum());
+			if (req.getSmallItemCodeId() != null) {
+				report.setSmallItemCodeId(req.getSmallItemCodeId());
 			}
 			report.setUpdateMemberId(userId);
 			updatedIds.add(report.getId());
@@ -1470,6 +1517,39 @@ public class ReportServiceImpl {
 		return TuiGridDTO.ResData.<AgentCaliHistoryListRow>builder()
 				.contents(items)
 				.pagination(pagination)
+				.build();
+	}
+
+	/**
+	 * 대행교정 목록 조회
+	 * - AGCY 성적서 전체 (is_visible != 'n')
+	 * - 진행상태 필터 / 교정일자 범위 / 키워드 검색 지원
+	 */
+	@Transactional(readOnly = true)
+	public TuiGridDTO.ResData<AgcyReportListRow> getAgcyReportList(AgcyReportDTO.ListReq req) {
+		int page    = Math.max(req.getPage() - 1, 0);
+		int perPage = req.getPerPage() > 0 ? req.getPerPage() : 25;
+		Pageable pageable = PageRequest.of(page, perPage);
+
+		// 빈 문자열 → null (IS NULL OR = :param 조건 처리용)
+		String status    = (req.getStatus()    == null || req.getStatus().isBlank())    ? null : req.getStatus();
+		String startDate = (req.getStartDate() == null || req.getStartDate().isBlank()) ? null : req.getStartDate();
+		String endDate   = (req.getEndDate()   == null || req.getEndDate().isBlank())   ? null : req.getEndDate();
+		// 검색타입 빈값 → 'all' (전체 필드 검색)
+		String searchType = (req.getSearchType() == null || req.getSearchType().isBlank()) ? "all" : req.getSearchType();
+		String keyword    = (req.getKeyword() == null) ? "" : req.getKeyword().trim();
+
+		List<AgcyReportListRow> items = reportRepository.searchAgcyReportList(
+				status, startDate, endDate, searchType, keyword, pageable);
+		long totalCount = reportRepository.countAgcyReportList(
+				status, startDate, endDate, searchType, keyword);
+
+		return TuiGridDTO.ResData.<AgcyReportListRow>builder()
+				.contents(items)
+				.pagination(TuiGridDTO.Pagination.builder()
+						.page(req.getPage())
+						.totalCount((int) totalCount)
+						.build())
 				.build();
 	}
 

@@ -39,11 +39,24 @@
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">대행의뢰처</label>
-                    <div class="col-8"><input type="text" class="form-control form-control-sm agcyAgent"></div>
+                    <div class="col-8">
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control agcyAgent agcyAgentInput" placeholder="업체명 입력 후 엔터 또는 조회">
+                            <div class="input-group-append">
+                                <button type="button" class="btn btn-secondary searchAgcyAgent">조회</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">접수구분</label>
-                    <div class="col-8"><input type="text" class="form-control form-control-sm orderTypeDisplay" readonly></div>
+                    <div class="col-8">
+                        <select class="form-control form-control-sm orderType">
+                            <option value="ACCREDDIT">공인</option>
+                            <option value="UNACCREDDIT">비공인</option>
+                            <option value="TESTING">시험</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">교정일자</label>
@@ -70,7 +83,14 @@
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">기기명 <span class="text-danger">*</span></label>
-                    <div class="col-8"><input type="text" class="form-control form-control-sm itemName"></div>
+                    <div class="col-8">
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control itemName itemNameInput" placeholder="기기명 입력 후 엔터 또는 조회">
+                            <div class="input-group-append">
+                                <button type="button" class="btn btn-secondary searchItem">조회</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">기기명(영문)</label>
@@ -94,7 +114,7 @@
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">교정수수료</label>
-                    <div class="col-8"><input type="number" class="form-control form-control-sm caliFee" min="0"></div>
+                    <div class="col-8"><input type="text" class="form-control form-control-sm caliFee" style="text-align:right" placeholder="0"></div>
                 </div>
                 <div class="form-group row mb-1">
                     <label class="col-4 col-form-label col-form-label-sm">비고</label>
@@ -108,7 +128,7 @@
     <div class="agcy-section">
         <div class="section-title">성적서 파일 <small class="text-muted font-weight-normal">(xlsx 1개 / pdf 1개, 동일 타입 기존 파일 삭제 후 재업로드)</small></div>
         <div class="d-flex flex-wrap align-items-center">
-            <input type="file" class="uploadExcel d-none" accept=".xlsx">
+            <input type="file" class="uploadExcel d-none" accept=".xlsx,.xls,.xlsm,.xlsb">
             <input type="file" class="uploadPdf d-none" accept=".pdf">
             <button type="button" class="btn btn-sm btn-outline-success btnUploadExcel mr-1">
                 <i class="bi bi-file-earmark-excel"></i> EXCEL 업로드

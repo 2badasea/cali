@@ -1,0 +1,14 @@
+/* 사업자번호 미등록 행 강조 */
+tr.no-agent-num .tui-grid-cell {
+    background-color: #ffe8e8 !important;
+}
+tr.no-agent-num:hover .tui-grid-cell {
+    background-color: #ffd0d0 !important;
+}
+
+/* 사업자번호 미등록 안내 문구 스타일 */
+.no-agent-num-text {
+    color: #c0392b;
+    font-size: 0.85em;
+    font-style: italic;
+}

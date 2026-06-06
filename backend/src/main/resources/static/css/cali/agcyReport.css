@@ -1,0 +1,16 @@
+.btn-xs {
+    padding: 1px 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    border-radius: 3px;
+}
+
+/* 완료 행 (reportStatus = SUCCESS) */
+.tui-grid-cell.row-complete {
+    background-color: #d4edda !important;
+}
+
+/* 취소 행 (reportStatus = CANCEL) */
+.tui-grid-cell.row-cancel {
+    background-color: #f8d7da !important;
+}

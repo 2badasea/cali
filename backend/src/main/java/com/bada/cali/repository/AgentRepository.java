@@ -85,6 +85,9 @@ public interface AgentRepository extends JpaRepository<Agent, Long> {
 			         ))
 			        )
 			  )
+			ORDER BY
+			    CASE WHEN (a.agentNum IS NULL OR a.agentNum = '') THEN 0 ELSE 1 END ASC,
+			    a.name ASC
 			""")
 	Page<AgentDTO.AgentRowData> searchAgents(
 			@Param("isVisible") YnType isVisible,
@@ -165,5 +168,12 @@ public interface AgentRepository extends JpaRepository<Agent, Long> {
 	@Query("SELECT a.id FROM Agent a WHERE a.isVisible = 'y' AND a.groupName = :groupName")
 	List<Long> findIdsByGroupName(@Param("groupName") String groupName);
 
+	/**
+	 * 업체계정 삭제 전 사전 조건 확인용.
+	 * 주어진 agent id 목록 중 이미 소프트삭제(is_visible='n')된 agent id만 반환.
+	 * 반환 개수 == 입력 개수이면 삭제 가능.
+	 */
+	@Query("SELECT a.id FROM Agent a WHERE a.id IN :ids AND a.isVisible = 'n'")
+	List<Long> findDeletedAgentIds(@Param("ids") List<Long> ids);
 
 }

@@ -4,6 +4,7 @@ import com.bada.cali.dto.MemberDTO;
 import com.bada.cali.entity.Member;
 import com.bada.cali.common.enums.AuthType;
 import com.bada.cali.common.enums.YnType;
+import com.bada.cali.repository.projection.AgentAccountListRow;
 import com.bada.cali.repository.projection.GetMemberInfoPr;
 import com.bada.cali.repository.projection.MemberListPr;
 import com.bada.cali.repository.projection.MemberSelectRow;
@@ -230,5 +231,51 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 			@Param("id") Long id,
 			@Param("isVisible") YnType isVisible
 	);
-	
+
+	// ──────────────────────────────────────────────────────────────
+	// 업체계정관리 전용 쿼리
+	// ──────────────────────────────────────────────────────────────
+
+	/**
+	 * 업체계정(agent_id > 0, is_visible = 'y') 목록 조회.
+	 * - isActive: 'y'/'n' 필터. 빈 문자열이면 전체.
+	 * - searchType: loginId / name. 빈 문자열이면 조건 미적용.
+	 * - keyword: 빈 문자열이면 조건 미적용.
+	 * 정렬: member.name ASC → id ASC
+	 */
+	@Query("""
+			SELECT
+			    m.id               AS id,
+			    m.agentId          AS agentId,
+			    m.name             AS name,
+			    m.loginId          AS loginId,
+			    m.loginCount       AS loginCount,
+			    m.lastLoginDatetime AS lastLoginDatetime,
+			    m.createDatetime   AS createDatetime,
+			    m.isActive         AS isActive
+			FROM Member m
+			WHERE m.agentId > 0
+			  AND m.isVisible = 'y'
+			  AND (:isActive = '' OR m.isActive = :isActive)
+			  AND (
+			        :keyword = ''
+			        OR (:searchType = 'loginId' AND m.loginId LIKE concat('%', :keyword, '%'))
+			        OR (:searchType = 'name'    AND m.name    LIKE concat('%', :keyword, '%'))
+			      )
+			ORDER BY m.name ASC, m.id ASC
+			""")
+	Page<AgentAccountListRow> getAgentAccountList(
+			@Param("isActive")    String isActive,
+			@Param("searchType")  String searchType,
+			@Param("keyword")     String keyword,
+			PageRequest pageRequest
+	);
+
+	/** 업체계정 loginId 중복 확인 (is_visible = 'y'인 것만) */
+	boolean existsByLoginIdAndIsVisible(String loginId, YnType isVisible);
+
+	/** 특정 member id의 agentId 목록 반환 (삭제 전 agent 상태 확인용) */
+	@Query("SELECT m.agentId FROM Member m WHERE m.id IN :ids AND m.isVisible = 'y'")
+	List<Long> findAgentIdsByMemberIds(@Param("ids") List<Long> ids);
+
 }

@@ -104,6 +104,7 @@
 					className: 'cursor_pointer',
 					// width: '120',
 					align: 'center',
+					whiteSpace: 'pre-line',
 				},
 				{
 					header: '제작회사',
@@ -111,6 +112,7 @@
 					className: 'cursor_pointer',
 					width: '200',
 					align: 'center',
+					whiteSpace: 'pre-line',
 				},
 				{
 					header: '형식',
@@ -118,6 +120,7 @@
 					className: 'cursor_pointer',
 					width: '200',
 					align: 'center',
+					whiteSpace: 'pre-line',
 				},
 				{
 					header: '기기번호',
@@ -125,6 +128,7 @@
 					className: 'cursor_pointer',
 					width: '150',
 					align: 'center',
+					whiteSpace: 'pre-line',
 				},
 				{
 					header: '관리번호',
@@ -159,6 +163,7 @@
 					className: 'cursor_pointer',
 					width: '120',
 					align: 'center',
+					whiteSpace: 'pre-line',
 				},
 				{
 					// EXCEL 파일 다운로드: SELF=signed_xlsx, AGCY=agcy_excel (없으면 null)
@@ -192,6 +197,24 @@
 			bodyHeight: 663,
 			data: $modal.data_source, // 그리드의 데이터를 초기화하는 과정에서 api 호출
 			rowHeight: 'auto',
+		});
+
+		// 행 색상: 완료(초록) / 취소(빨강)
+		// 취소: SELF/AGCY 모두 reportStatus === 'CANCEL'
+		// 완료: AGCY = reportStatus 'SUCCESS' / SELF = approvalStatus 'SUCCESS' (기술책임자 결재 완료)
+		function applyRowColors() {
+			$modal.grid.getData().forEach((row) => {
+				const { rowKey, reportType, reportStatus, approvalStatus } = row;
+				if (reportStatus === 'CANCEL') {
+					$modal.grid.addRowClassName(rowKey, 'row-cancel');
+				} else if ((reportType === 'AGCY' && reportStatus === 'SUCCESS') ||
+					       (reportType === 'SELF' && approvalStatus === 'SUCCESS')) {
+					$modal.grid.addRowClassName(rowKey, 'row-complete');
+				}
+			});
+		}
+		$modal.grid.on('response', () => {
+			requestAnimationFrame(applyRowColors);
 		});
 
 		// 그리드 이벤트 정의
@@ -230,7 +253,7 @@
 				}
 				// 대행
 				else {
-					const resModal = await gModal(
+					await gModal(
 						'/cali/agcyReportModify',
 						{ id: id },
 						{
@@ -241,9 +264,8 @@
 							confirm_button_text: '저장',
 						},
 					);
-					if (resModal) {
-						$modal.grid.reloadData();
-					}
+					// 취소/초기화 버튼으로 상태가 변경될 수 있으므로 닫힘 시 항상 갱신
+					$modal.grid.reloadData();
 				}
 			}
 		});
@@ -280,7 +302,7 @@
 		// 대행성적서 등록 모달 호출
 		.on('click', '.addAgcyReport', async function (e) {
 			e.preventDefault();
-			const resModal = await gModal(
+			await gModal(
 				'/cali/agcyRegisterReport',
 				{
 					caliOrderId: caliOrderId,
@@ -289,15 +311,14 @@
 				},
 				{
 					title: '대행성적서 등록',
-					size: 'xl',
+					size: 'xxxl',
 					show_close_button: true,
 					show_confirm_button: true,
 					confirm_button_text: '저장',
 				},
 			);
-			if (resModal) {
-				$modal.grid.reloadData();
-			}
+			// 등록 후 또는 취소 후 닫힘 시 항상 갱신
+			$modal.grid.reloadData();
 		})
 		// 행 수 변경
 		.on('change', '.rowLeng', function () {
@@ -356,18 +377,12 @@
 					}
 					// 대행
 					else {
-						if (row.approvalStatus === 'SUCCESS') {
+						// 대행: 완료 처리된 건만 삭제 불가 (대기/취소는 허용)
+						if (row.reportStatus === 'SUCCESS') {
 							isFlag = false;
-							gToast('이미 결재가 완료된 대행 건이 존재합니다.', 'warning');
+							gToast('완료 처리된 대행성적서는 삭제할 수 없습니다.', 'warning');
 							return false;
 						} else {
-							// if (validateInfo['AGCY'] != undefined && Array.isArray(validateInfo['AGCY'])) {
-							// 	validateInfo['AGCY'].push(row.id);
-							// } else {
-							// 	validateInfo['AGCY'] = [];
-							// 	validateInfo['AGCY'].push(row.id);
-							// }
-							// NOTE 위의 코드를 개선한 방식
 							if (!Array.isArray(validateInfo['AGCY'])) {
 								validateInfo['AGCY'] = [];
 							}
@@ -505,7 +520,7 @@
 			{ reportIds },
 			{
 				title: `대행 통합수정 [${reportIds.length}건 선택]`,
-				size: 'xl',
+				size: 'lg',
 				show_close_button: true,
 				show_confirm_button: true,
 				confirm_button_text: '저장',

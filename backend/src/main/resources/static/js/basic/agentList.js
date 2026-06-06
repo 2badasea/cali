@@ -17,6 +17,9 @@
 		console.log('🚀 ~ $modal.param:', $modal.param);
 	};
 
+	// 최초 메뉴 진입 시에만 사업자번호 미등록 안내 alert를 띄우기 위한 플래그
+	let isFirstLoad = true;
+
 	// 업체관리 리스트 가져오기
 	$modal.data_source = {
 		api: {
@@ -83,6 +86,13 @@
 				width: '100',
 				className: 'cursor_pointer',
 				align: 'center',
+				// 사업자번호가 없는 경우 안내 문구 표시
+				formatter: function (data) {
+					if (!data.value || data.value.trim() === '') {
+						return '<span class="no-agent-num-text">사업자번호를 등록해주세요</span>';
+					}
+					return data.value;
+				},
 			},
 			{
 				header: '대표명',
@@ -132,6 +142,10 @@
 		rowHeaders: ['checkbox'],
 		minBodyHeight: 663,
 		bodyHeight: 663,
+		// 사업자번호(agentNum)가 비어있는 행은 'no-agent-num' 클래스 부여 → agentList.css에서 붉은 배경 처리
+		rowClassRule: {
+			'no-agent-num': (row) => !row.agentNum || row.agentNum.trim() === '',
+		},
 		// data: [
 		// 	{
 		// 		name: 'Beautiful Lies',
@@ -141,6 +155,29 @@
 		// 	},
 		// ],
 		data: $modal.data_source,
+		// 최초 진입 시 1회만 사업자번호 미등록 업체 안내 alert 표시
+		response: function (e) {
+			if (!isFirstLoad) return;
+			isFirstLoad = false;
+
+			try {
+				const json = JSON.parse(e.xhr.response);
+				const rows = json?.data?.contents ?? [];
+				// 사업자번호가 비어있는 행 카운트
+				// (정렬이 미등록 업체 우선이므로 첫 페이지 기준 카운트가 전체 집계와 동일)
+				const noAgentNumCount = rows.filter((r) => !r.agentNum || r.agentNum.trim() === '').length;
+				if (noAgentNumCount > 0) {
+					Swal.fire({
+						icon: 'warning',
+						title: '사업자번호 미등록 안내',
+						html: `사업자번호가 등록되지 않은 업체가 <strong>${noAgentNumCount}건</strong> 있습니다.<br>확인 후 등록해주세요.`,
+						confirmButtonText: '확인',
+					});
+				}
+			} catch (err) {
+				console.error('agentList 첫 로드 콜백 오류:', err);
+			}
+		},
 	});
 
 	// 페이지 내 이벤트
